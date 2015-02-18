@@ -1,6 +1,4 @@
 Este es mi cambio NS
 
-MEJOR CAMBIAMOS ESTO
-LSHDFOHEOFNE
-HEOFHEWORHEOR
-
+v skdplbn 
+>>>>>>> Stashed changes
