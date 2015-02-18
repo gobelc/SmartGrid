@@ -36,6 +36,8 @@
  *      Matthias Kovatsch <kovatsch@inf.ethz.ch>
  */
 
+/*este es el nuevo*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,245 +173,135 @@ int signo(float valoraso){
  		}
  	}
 
- 	int desfasaje(int SENSOR1, int SENSOR2){
+int desfasaje(int SENSOR1, int SENSOR2){
 
- 		int deltaN=0;
+	int deltaN=0;
 
- 		float value1=phidgets.value(SENSOR1);
- 		float value2=phidgets.value(SENSOR2);
+	float value1=phidgets.value(SENSOR1);
+	float value2=phidgets.value(SENSOR2);
 
- 		int sign_1;
- 		sign_1=signo(value1);
- 		int sign_2;
- 		sign_2=signo(value2);
+	int sign_1;
+	sign_1=signo(value1);
+	int sign_2;
+	sign_2=signo(value2);
 
- 		if (sign_1==1)
- 			while (signo(value1)){
- 				value1=phidgets.value(SENSOR1);
- 				value2=phidgets.value(SENSOR2);
- 				sign_2=signo(value2);
- 			}
- 			if (sign_2==1)
- 				while (sign_2==1){
- 					value2=phidgets.value(SENSOR2);
- 					sign_2=signo(value2);
- 					deltaN++;
- 				}
- 			if (sign_2==0)
- 				while (sign_2==0){
- 					value2=phidgets.value(SENSOR2);
- 					sign_2=signo(value2);
- 				}
- 				while (sign_2==1){
- 					value2=phidgets.value(SENSOR2);
- 					sign_2=signo(value2);
- 			 		deltaN++;
- 				}
-
- 		if (sign_1==0)
- 				while (!signo(value1)){
- 					value1=phidgets.value(SENSOR1);
- 				 	value2=phidgets.value(SENSOR2);
- 				 	sign_2=signo(value2);
- 				}
-				if (sign_2==0)
-					while (sign_2==0){
-						value2=phidgets.value(SENSOR2);
-						sign_2=signo(value2);
-						deltaN++;
-					}
-				if (sign_2==1)
-					while (sign_2==1){
-						value2=phidgets.value(SENSOR2);
-						sign_2=signo(value2);
-					}
-					while (sign_2==0){
-						value2=phidgets.value(SENSOR2);
-						sign_2=signo(value2);
-						deltaN++;
-					}
-	return deltaN;
- 	}
-
-
-
-
-
- 	double filtrado(x,coef_1,coef_2,coef_3,coef_4){
- 	 	 	// FIR de media movil
- 			double x_3;
- 		    double x_2;
- 		   	double x_1;
- 	 	 	double y=x*coef_1+x_1*coef_2+x_2*coef_3+x_3*coef_4;
- 	 	 	x_3=x_2;
- 	 	 	x_2=x_1;
- 	 	 	x_1=y;
- 	 	 	return 2*y; // Ajusto ganancia del filtro, dado que modulo de h[n]=1/2.
- 	 }
-
- 	 void leer_voltaje(void){
-  	 	shift(B,W/4);
- 		B[W/4] = Gv*phidgets.value(SENSOR_VOLTAJE)*VREF/(4096);
- 	 	return;
- 	 }
-
- 	 double leer_corriente_1(void){
- 	 	double value=Gi1*phidgets.value(SENSOR_CORRIENTE_1)*VREF/(4096);
- 	 	return value;
- 	 }
-
- 	 double leer_corriente_2(void){
- 	 	double value=Gi2*phidgets.value(SENSOR_CORRIENTE_2)*VREF/(4096);
- 	 	return value;
- 	 }
-
- 	 int definir_escala_corriente(void){
-
- 	 	double suma=0;
- 	 	double promedio;
- 	 	int i=0;
- 	 	for (i=0;i<50;i++){
- 	 		//suma=filtrado(leer_corriente_2(),coef_1,coef_2,coef_3,coef_4)+suma;
- 	 	suma=leer_corriente_2();
- 	 	}
-
- 	 	promedio=suma/(i+1);
-
- 	 	if (promedio<CurrentThreshold){
- 	 		flag_corriente=1;
- 	 		}
- 	 		else{
- 	 			flag_corriente=0;
- 	 			}
- 	 	return flag_corriente;
- 	 	}
-
- 	 void lectura_inicial(){
- 	 	flag_corriente=definir_escala_corriente();
- 	 	int i=0;
- 	 	for (i=0;i<W/4;i++){
- 	 			leer_voltaje();
- 	 			printf("Lectura inicial %i : %i Volts %i\n",i,(int)B[W/4],(int)B[0]);
- 	 		}
-
-
- 	 return;
- 	 }
-
-
-
-
-
-
- 	 struct Medida medir_unidades(){
-
- 		double A=0; // W muestras de corriente
-
- 		int i;
-
- 		double a=0;
- 	 	double b=0;
- 	 	double c=0;
- 	 	double d=0;
- 	 //	double e=0;
-
-		static uint16_t buff_C1[TAM_VENTANA];
-		static uint16_t buff_C2[TAM_VENTANA];
-		static uint16_t buff_Corr[TAM_VENTANA];
-		static uint16_t buff_V[TAM_VENTANA];
-		static uint16_t *buff_ptrC1;
-		static uint16_t *buff_ptrC2;
-		static uint16_t *buff_ptrV;
-		static struct etimer tmuestreo;
-
-		buff_ptrC1 = buff_C1;
-		buff_ptrC2 = buff_C2;
-		buff_ptrV = buff_V;
-
-		for (i=0; i<TAM_VENTANA; i++) {
-			// Timer y período de muestreo:
-    			etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
-  			PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
-
-    			SENSORS_ACTIVATE(phidgets);
-			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1);
-			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2);
-			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE);	
-    			SENSORS_DEACTIVATE(phidgets);
-	
-			buff_ptrC1++;
-			buff_ptrC2++;
-			buff_ptrV++;
+	if (sign_1==1)
+		while (signo(value1)){
+			value1=phidgets.value(SENSOR1);
+			value2=phidgets.value(SENSOR2);
+			sign_2=signo(value2);
 		}
-		//Luego de obtenidas todas las muestras, se vuelve el puntero al inicio.
-		buff_ptrC1 = buff_C1;
-		buff_ptrC2 = buff_C2;
-		buff_ptrV = buff_V;
-		
-		double VrmsAux=0;
-		double IrmsAux=0;
-		double Paux=0;
-		double Qaux=0;
+		if (sign_2==1)
+			while (sign_2==1){
+				value2=phidgets.value(SENSOR2);
+				sign_2=signo(value2);
+				deltaN++;
+			}
+		if (sign_2==0)
+			while (sign_2==0){
+				value2=phidgets.value(SENSOR2);
+				sign_2=signo(value2);
+			}
+			while (sign_2==1){
+				value2=phidgets.value(SENSOR2);
+				sign_2=signo(value2);
+				deltaN++;
+			}
 
-		if (definir_escala_corriente == 1){
-			buff_Corr = buff_C1;
-		}else{
-			buff_Corr = buff_C2;
-		}
-		
-		for (i=0; i<TAM_VENTANA-50; i++){
-			VrmsAux = VrmsAux+buff_V[i]*buff_V[i];
- 			IrmsAux = IrmsAux+buff_Corr[i]*buff_Corr[i];
-			Paux = Paux + buff_V[i]*buff_Corr[i];
-			Qaux = Qaux + buff_V[i]*buff_Corr[i+50];
- 		}
-
- 		struct Medida r;
-
- 	 	r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-50));
- 	 	r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
- 	 	r.p=Paux/(TAM_VENTANA-50);
- 	 	r.q=Qaux/(TAM_VENTANA-50);
- 	 	r.s=sqrtf(r.p*r.p+r.q*r.q);
- 	 	r.fp=r.p/r.s;
-
-
- 	 	printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
- 	 	//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
-
-
-
-
- 	 	return r;
-
+	if (sign_1==0)
+			while (!signo(value1)){
+				value1=phidgets.value(SENSOR1);
+				value2=phidgets.value(SENSOR2);
+				sign_2=signo(value2);
+			}
+			if (sign_2==0)
+				while (sign_2==0){
+					value2=phidgets.value(SENSOR2);
+					sign_2=signo(value2);
+					deltaN++;
+				}
+			if (sign_2==1)
+				while (sign_2==1){
+					value2=phidgets.value(SENSOR2);
+					sign_2=signo(value2);
+				}
+				while (sign_2==0){
+					value2=phidgets.value(SENSOR2);
+					sign_2=signo(value2);
+					deltaN++;
+				}
+return deltaN;
 }
+
+
+
+
+
+ double filtrado(x,coef_1,coef_2,coef_3,coef_4){
+		// FIR de media movil
+		double x_3;
+		double x_2;
+		double x_1;
+		double y=x*coef_1+x_1*coef_2+x_2*coef_3+x_3*coef_4;
+		x_3=x_2;
+		x_2=x_1;
+		x_1=y;
+		return 2*y; // Ajusto ganancia del filtro, dado que modulo de h[n]=1/2.
+ }
+
+
 
 //------------Fin funciones metering-------------------------
 
 PROCESS_THREAD(er_server, ev, data)
 {
 
-  static struct etimer temporizador; // declaro un temporizador como testigo
-  static int32_t testigo = 0; // declaro una variable de prueba
+  //static struct etimer temporizador; // declaro un temporizador como testigo
+  //static int32_t testigo = 0; // declaro una variable de prueba
 
-//static struct etimer periodico;
+  double A=0; // W muestras de corriente
+
+   		int i;
+
+  		static uint16_t buff_C1[TAM_VENTANA];
+  		static uint16_t buff_C2[TAM_VENTANA];
+  		static uint16_t buff_Corr[TAM_VENTANA];
+  		static uint16_t buff_V[TAM_VENTANA];
+  		static uint16_t *buff_ptrC1;
+  		static uint16_t *buff_ptrC2;
+  		static uint16_t *buff_ptrV;
+  		/*static uint32_t buff_C1[TAM_VENTANA];
+		static uint32_t buff_C2[TAM_VENTANA];
+		static uint32_t buff_Corr[TAM_VENTANA];
+		static uint32_t buff_V[TAM_VENTANA];
+		static uint32_t *buff_ptrC1;
+		static uint32_t *buff_ptrC2;
+		static uint32_t *buff_ptrV;*/
+  		static struct etimer tmuestreo;
+
+  		static struct etimer periodico;
+
 
   PROCESS_BEGIN();
 
 //------------------Declaraciones metering--------------------------------------
 
-//extern const struct sensors_sensor phidgets;
-//SENSORS_ACTIVATE(phidgets);
+//static int testigo_periodico = 0;
+//static int testigo_muestreo = 0;
 
+extern const struct sensors_sensor phidgets;
 
+		buff_ptrC1 = buff_C1;
+  		buff_ptrC2 = buff_C2;
+  		buff_ptrV = buff_V;
 
 printf("Realizando la lectura inicial...");
 //lectura_inicial();
 printf("Medicion en curso...");
 
 //static int32_t testigo = 0; // declaro una variable de prueba
-etimer_set(&temporizador, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
-//etimer_set(&periodico, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
+//etimer_set(&temporizador, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
+etimer_set(&periodico, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
 
 //----------Funciones de diagnóstico, información y auxiliares------------------
 //------------------------------------------------------------------------------
@@ -456,46 +348,98 @@ etimer_set(&temporizador, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
 
   while(1) {
 
-	  /*PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
-	  struct Medida m = medir_unidades();
-	  dato_get=(int32_t)(m.Vrms);
-	  etimer_reset(&periodico);*/
+	  PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
+
+	  //testigo_periodico++;
+	  //printf("testigo_periodico: %d\n", testigo_periodico);
+	  etimer_reset(&periodico);
+	  static uint16_t voltaje=0;
+	  static uint16_t iter=0;
+	  static uint16_t i=0;
+	  //printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[iter],*buff_ptrV, &buff_V[iter],buff_ptrV,voltaje);
+	  SENSORS_ACTIVATE(phidgets);
+	  etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
+	  for (iter=0; iter<TAM_VENTANA; iter++) {
+	  			// Timer y período de muestreo:
+		  //OJO: Aca hay que chequear el tipo de timer a utilizar porque con este no se puede contar más fino que 1/32 seg.
+		  	  	  	  PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
+		  	  	  	  etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
+
+	    			//testigo_muestreo++;
+	    			//printf("testigo_muestreo: %d\n", testigo_muestreo);
+/* Acá estamos despreciando el tiempo de procesamiento de la lectura. Es decir, el tiempo real del período
+ * de muestreo es PERIODO_MUESTREO + T(lectura)
+ */
+	  			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1)*VREF/4096;
+	  			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2)*VREF/4096;
+	  			voltaje = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
+	  			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
+	  			//int aux = phidgets.value(SENSOR_VOLTAJE);
+	  			//printf("voltaje %d \n",voltaje);
+
+	      		//printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[iter],*buff_ptrV, &buff_V[iter],buff_ptrV,voltaje);
+	  			buff_ptrC1++;
+	  			buff_ptrC2++;
+	  			buff_ptrV++;
+	  		}
+
+	  		//Luego de obtenidas todas las muestras, se vuelve el puntero al inicio.
+	  		buff_ptrC1 = buff_C1;
+	  		buff_ptrC2 = buff_C2;
+	  		buff_ptrV = buff_V;
+
+	  		static float VrmsAux=0;
+	  		static float IrmsAux=0;
+	  		static float Paux=0;
+	  		static float Qaux=0;
+	  		static float aux;
+	  		static int aux2;
+
+	  		VrmsAux=0;
+	  		IrmsAux=0;
+	  		Paux=0;
+	  		Qaux=0;
+
+
+	  		for (i=0; i<TAM_VENTANA-50; i++){
+	  			aux=(float)powf(buff_V[i],2);
+	  			aux2=(int)sqrtf(aux);
+	  			VrmsAux = VrmsAux+(float)powf(buff_V[i],2);
+	   			IrmsAux = IrmsAux+buff_C1[i]*buff_C1[i];
+	  			Paux = Paux + buff_V[i]*buff_C1[i];
+	  			Qaux = Qaux + buff_V[i]*buff_C1[i+50];
+	  			//printf("V: %d\n C1: %d\n",buff_V[i],buff_C1[i] );
+	  			printf("V en buffer: %d\n VrmsAux: %d\n aux2: %d\n",(int)buff_V[i],(int)VrmsAux, aux2);
+	   		}
+
+	   		struct Medida r;
+
+	   	 	r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-50));
+	   	 	r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
+	   	 	r.p=Paux/(TAM_VENTANA-50);
+	   	 	r.q=Qaux/(TAM_VENTANA-50);
+	   	 	r.s=sqrtf(r.p*r.p+r.q*r.q);
+	   	 	r.fp=r.p/r.s;
+
+
+	   	 	printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
+	   	 	//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
+
+
+	  	  dato_get=(int32_t)(r.Vrms);
+
+
+
+	  }  /* while (1) */
+
+
+
 
 	  //PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
 	  //return 0;
 
-	  PROCESS_WAIT_EVENT();
+	 // PROCESS_WAIT_EVENT();
 
-
-
-	if (ev == PROCESS_EVENT_TIMER && etimer_expired(&temporizador)) {
-		if (testigo < 1000) {
-			++testigo;
-		}
-		else {
-			testigo = 0;
-			}
-			printf("testigo = %d \n",testigo);
-			dato_get = testigo + 100;
-			dato_obs = testigo + 200;
-			dato_ev = testigo + 300;
-
-			etimer_reset(&temporizador);
-		}
-
-#if PLATFORM_HAS_BUTTON
-		else if ((ev == sensors_event) && (data == &button_sensor)) {
-		printf("Alguien apreto el boton!\n");
-
-		      /* Acá llamo al trigger del recurso de evento "res_event_SG
-		       * El triger se encargará de hacer las tareas disparadas por
-		       * dicho evento */
-		res_event_SG.trigger();
-		}
-#endif /* PLATFORM_HAS_BUTTON */
-	
-
-  }                             /* while (1) */
 
   PROCESS_END();
 }

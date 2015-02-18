@@ -1,4 +1,4 @@
-all: er-example-server er-example-client er-server-SG2
+all: er-example-server er-example-client
 # use target "er-plugtest-server" explicitly when requried 
 
 CONTIKI=../../..
@@ -6,7 +6,7 @@ CONTIKI=../../..
 # Habilitación de debug para Code Watcher
 CFLAGS += -g
 
-#Habilitacion libreria MATH
+#Habilitacion sqrtf
 TARGET_LIBFILES += -lm
 
 # Contiki IPv6 configuration
