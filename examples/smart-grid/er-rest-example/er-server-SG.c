@@ -58,9 +58,9 @@
 #define SENSOR_VOLTAJE 3
 #define VREF 5
 #define TAM_VENTANA 250 
-#define PERIODO_MUESTREO 1/10000
+#define PERIODO_MUESTREO 1/128 //128 es la máxima resolución (div de seg) que se alcanza con los timers estandar
+#define TIEMPO_ENTRE_MEDIDAS 5
 
-static int W=1000; //Muestras de ventana, típicamente 3 ciclos de la señal de entrada
 //-------------------------------------------
 
 #if PLATFORM_HAS_BUTTON
@@ -89,70 +89,48 @@ extern resource_t res_obs_SG;
 extern resource_t res_event_SG;
 extern resource_t res_put_SG;
 
-/*#if PLATFORM_HAS_LEDS
-extern resource_t res_leds, res_toggle;
-#endif*/
-
-/*#if PLATFORM_HAS_BATTERY
-#include "dev/battery-sensor.h"
-extern resource_t res_battery;
-#endif*/
 
 PROCESS(er_server, "Smart Grid Server Node");
 AUTOSTART_PROCESSES(&er_server);
 
 // INICIALIZACION DE VARIABLES
 
- /*
 
-  	  static double Vref=3.4; // Voltaje de referencia CC
-  	  static double Rshunt=1; //Resistencia shunt transductor corriente
-  	  static double Theta1=23; //Desfasaje natural voltaje/corriente n°1
-  	  static double Theta2=34; //Desfasaje natural voltaje/corriente n°1 Threshold
-  	  static int Fmuestreo; //Frecuencia de muestreo ADC
-  	  static int Fred; //Frecuencia de red eléctrica
-  	  double Volt;
-  	  double Volt90;
-  	  double x;
+static double Gi1=1; //Ganancia V/A Amplificador n°1 corriente
+static double Gi2=1; //Ganancia V/A Amplificador n°2 corriente
+static double Gv=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
 
- */
-   	  static double Gi1=1; //Ganancia V/A Amplificador n°1 corriente
-   	  static double Gi2=1; //Ganancia V/A Amplificador n°2 corriente
-   	  static double Gv=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
+static double CurrentThreshold=2.3; //¿Qué es?
+static double B[251]; //¿Qué es?
 
-  	  static double CurrentThreshold=2.3;
-  	  double B[251];
-
-  	 float Vrms=0;
-  	  	 	float Irms=0;
-  	  	 	float p=0;
-  	  	 	float q=0;
-  	  	 	float s=0;
-  	  	 	float fp=0;
+static float Vrms=0;
+static float Irms=0;
+static float p=0;
+static float q=0;
+static float s=0;
+static float fp=0;
 
 
-  	  int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
-  	  int count=0;
-  	  // Coeficientes del Filtro Pasabajos
-  	  static double coef_1=1/4;
-  	  static double coef_2=1/4;
-  	  static double coef_3=1/4;
-  	  static double coef_4=1/4;
+static int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
+
+// Coeficientes del Filtro Pasabajos
+static double coef_1=1/4;
+static double coef_2=1/4;
+static double coef_3=1/4;
+static double coef_4=1/4;
 
 
 
-  	 typedef struct Medida {
-  		float Vrms;
-  		float Irms;
-  		float q;
-  		float p;
-  		float s;
-  		float fp;
-  	 } Medida;
-
+typedef struct Medida {
+	float Vrms;
+	float Irms;
+	float q;
+	float p;
+	float s;
+	float fp;
+} Medida;
 
 //------------------FIN Declaraciones metering--------------------------------------
-
 
 
 // Funciones Metering
@@ -234,9 +212,6 @@ return deltaN;
 }
 
 
-
-
-
  double filtrado(x,coef_1,coef_2,coef_3,coef_4){
 		// FIR de media movil
 		double x_3;
@@ -249,59 +224,38 @@ return deltaN;
 		return 2*y; // Ajusto ganancia del filtro, dado que modulo de h[n]=1/2.
  }
 
-
-
 //------------Fin funciones metering-------------------------
 
 PROCESS_THREAD(er_server, ev, data)
 {
 
-  //static struct etimer temporizador; // declaro un temporizador como testigo
-  //static int32_t testigo = 0; // declaro una variable de prueba
+	int i;
 
-  double A=0; // W muestras de corriente
+	static uint16_t buff_C1[TAM_VENTANA];
+	static uint16_t buff_C2[TAM_VENTANA];
+	static uint16_t buff_Corr[TAM_VENTANA];
+	static uint16_t buff_V[TAM_VENTANA];
+	static uint16_t *buff_ptrC1;
+	static uint16_t *buff_ptrC2;
+	static uint16_t *buff_ptrV;
 
-   		int i;
+	static struct etimer tmuestreo;
 
-  		static uint16_t buff_C1[TAM_VENTANA];
-  		static uint16_t buff_C2[TAM_VENTANA];
-  		static uint16_t buff_Corr[TAM_VENTANA];
-  		static uint16_t buff_V[TAM_VENTANA];
-  		static uint16_t *buff_ptrC1;
-  		static uint16_t *buff_ptrC2;
-  		static uint16_t *buff_ptrV;
-  		/*static uint32_t buff_C1[TAM_VENTANA];
-		static uint32_t buff_C2[TAM_VENTANA];
-		static uint32_t buff_Corr[TAM_VENTANA];
-		static uint32_t buff_V[TAM_VENTANA];
-		static uint32_t *buff_ptrC1;
-		static uint32_t *buff_ptrC2;
-		static uint32_t *buff_ptrV;*/
-  		static struct etimer tmuestreo;
-
-  		static struct etimer periodico;
+	static struct etimer periodico;
 
 
   PROCESS_BEGIN();
 
-//------------------Declaraciones metering--------------------------------------
 
-//static int testigo_periodico = 0;
-//static int testigo_muestreo = 0;
+	extern const struct sensors_sensor phidgets;
 
-extern const struct sensors_sensor phidgets;
-
-		buff_ptrC1 = buff_C1;
-  		buff_ptrC2 = buff_C2;
-  		buff_ptrV = buff_V;
+	buff_ptrC1 = buff_C1;
+	buff_ptrC2 = buff_C2;
+	buff_ptrV = buff_V;
 
 printf("Realizando la lectura inicial...");
-//lectura_inicial();
-printf("Medicion en curso...");
 
-//static int32_t testigo = 0; // declaro una variable de prueba
-//etimer_set(&temporizador, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
-etimer_set(&periodico, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
+etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizador a 1 min.
 
 //----------Funciones de diagnóstico, información y auxiliares------------------
 //------------------------------------------------------------------------------
@@ -337,11 +291,6 @@ etimer_set(&periodico, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
 
   /* Define application-specific events here. */
 
-
-/*#if PLATFORM_HAS_BUTTON
-	SENSORS_ACTIVATE(button_sensor);
-#endif*/
-
 //--------FIN Funciones de diagnóstico, información y auxiliares----------------
 //------------------------------------------------------------------------------
 
@@ -350,95 +299,73 @@ etimer_set(&periodico, 5*CLOCK_SECOND); //seteo el temporizador a 1 min.
 
 	  PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
 
-	  //testigo_periodico++;
-	  //printf("testigo_periodico: %d\n", testigo_periodico);
 	  etimer_reset(&periodico);
-	  static uint16_t voltaje=0;
-	  static uint16_t iter=0;
-	  static uint16_t i=0;
-	  //printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[iter],*buff_ptrV, &buff_V[iter],buff_ptrV,voltaje);
+	  static uint16_t i1=0;
+	  static uint16_t i2=0;
+	  //printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
 	  SENSORS_ACTIVATE(phidgets);
 	  etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
-	  for (iter=0; iter<TAM_VENTANA; iter++) {
-	  			// Timer y período de muestreo:
-		  //OJO: Aca hay que chequear el tipo de timer a utilizar porque con este no se puede contar más fino que 1/32 seg.
-		  	  	  	  PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
-		  	  	  	  etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
+	  for (i1=0; i1<TAM_VENTANA; i1++) {
+			// Timer y período de muestreo:
+			PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
+			etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
 
-	    			//testigo_muestreo++;
-	    			//printf("testigo_muestreo: %d\n", testigo_muestreo);
-/* Acá estamos despreciando el tiempo de procesamiento de la lectura. Es decir, el tiempo real del período
- * de muestreo es PERIODO_MUESTREO + T(lectura)
- */
-	  			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1)*VREF/4096;
-	  			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2)*VREF/4096;
-	  			voltaje = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
-	  			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
-	  			//int aux = phidgets.value(SENSOR_VOLTAJE);
-	  			//printf("voltaje %d \n",voltaje);
+			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1)*VREF/4096;
+			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2)*VREF/4096;
+			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
 
-	      		//printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[iter],*buff_ptrV, &buff_V[iter],buff_ptrV,voltaje);
-	  			buff_ptrC1++;
-	  			buff_ptrC2++;
-	  			buff_ptrV++;
-	  		}
+			//printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
+			buff_ptrC1++;
+			buff_ptrC2++;
+			buff_ptrV++;
+		}
 
-	  		//Luego de obtenidas todas las muestras, se vuelve el puntero al inicio.
-	  		buff_ptrC1 = buff_C1;
-	  		buff_ptrC2 = buff_C2;
-	  		buff_ptrV = buff_V;
+		//Luego de obtenidas todas las muestras, se vuelve el puntero al inicio.
+		buff_ptrC1 = buff_C1;
+		buff_ptrC2 = buff_C2;
+		buff_ptrV = buff_V;
 
-	  		static float VrmsAux=0;
-	  		static float IrmsAux=0;
-	  		static float Paux=0;
-	  		static float Qaux=0;
-	  		static float aux;
-	  		static int aux2;
+		static float VrmsAux=0;
+		static float IrmsAux=0;
+		static float Paux=0;
+		static float Qaux=0;
 
-	  		VrmsAux=0;
-	  		IrmsAux=0;
-	  		Paux=0;
-	  		Qaux=0;
+		VrmsAux=0;
+		IrmsAux=0;
+		Paux=0;
+		Qaux=0;
 
 
-	  		for (i=0; i<TAM_VENTANA-50; i++){
-	  			aux=(float)powf(buff_V[i],2);
-	  			aux2=(int)sqrtf(aux);
-	  			VrmsAux = VrmsAux+(float)powf(buff_V[i],2);
-	   			IrmsAux = IrmsAux+buff_C1[i]*buff_C1[i];
-	  			Paux = Paux + buff_V[i]*buff_C1[i];
-	  			Qaux = Qaux + buff_V[i]*buff_C1[i+50];
-	  			//printf("V: %d\n C1: %d\n",buff_V[i],buff_C1[i] );
-	  			printf("V en buffer: %d\n VrmsAux: %d\n aux2: %d\n",(int)buff_V[i],(int)VrmsAux, aux2);
-	   		}
+		for (i2=0; i2<TAM_VENTANA-50; i2++){
 
-	   		struct Medida r;
+		VrmsAux = VrmsAux+(float)powf(buff_V[i2],2);
+		IrmsAux = IrmsAux+(float)powf(buff_C1[i2],2);
+		Paux = Paux + buff_V[i2]*buff_C1[i2];
+		Qaux = Qaux + buff_V[i2]*buff_C1[i2+50];
+		//printf("V: %d\n C1: %d\n",buff_V[i2],buff_C1[i2] );
+		printf("V en buffer: %d\n VrmsAux: %d\n",(int)buff_V[i2],(int)VrmsAux);
 
-	   	 	r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-50));
-	   	 	r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
-	   	 	r.p=Paux/(TAM_VENTANA-50);
-	   	 	r.q=Qaux/(TAM_VENTANA-50);
-	   	 	r.s=sqrtf(r.p*r.p+r.q*r.q);
-	   	 	r.fp=r.p/r.s;
+		}
+
+		struct Medida r;
+
+		r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-50));
+		r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
+		r.p=Paux/(TAM_VENTANA-50);
+		r.q=Qaux/(TAM_VENTANA-50);
+		r.s=sqrtf(r.p*r.p+r.q*r.q);
+		r.fp=r.p/r.s;
+
+		printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
+		//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
 
 
-	   	 	printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
-	   	 	//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
-
-
-	  	  dato_get=(int32_t)(r.Vrms);
+		dato_get=(int32_t)(r.Vrms);
 
 
 
 	  }  /* while (1) */
 
-
-
-
-	  //PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
-	  //return 0;
-
-	 // PROCESS_WAIT_EVENT();
 
 
   PROCESS_END();
