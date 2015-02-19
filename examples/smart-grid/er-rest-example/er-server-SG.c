@@ -310,9 +310,9 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 			PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
 			etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
 
-			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1)*VREF/4096;
-			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2)*VREF/4096;
-			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE)*VREF/4096;
+			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1);
+			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2);
+			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE);
 
 			//printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
 			buff_ptrC1++;
@@ -334,16 +334,25 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 		IrmsAux=0;
 		Paux=0;
 		Qaux=0;
+		//Variables auxiliares para almacenar muestras en float y pasadas a voltaje.
+		static float VsampConvert;
+		static float CSampConvert;
+		static float CSampDefConvert;
 
 
 		for (i2=0; i2<TAM_VENTANA-50; i2++){
+			VsampConvert = buff_V[i2]*VREF/4096;
+			CSampConvert = buff_C1[i2]*VREF/4096;
+			CSampDefConvert = buff_C1[i2+50]*VREF/4096;
 
-		VrmsAux = VrmsAux+(float)powf(buff_V[i2],2);
-		IrmsAux = IrmsAux+(float)powf(buff_C1[i2],2);
-		Paux = Paux + buff_V[i2]*buff_C1[i2];
-		Qaux = Qaux + buff_V[i2]*buff_C1[i2+50];
-		//printf("V: %d\n C1: %d\n",buff_V[i2],buff_C1[i2] );
-		printf("V en buffer: %d\n VrmsAux: %d\n",(int)buff_V[i2],(int)VrmsAux);
+			VrmsAux = VrmsAux+powf(VsampConvert,2);
+			IrmsAux = IrmsAux+powf(CSampConvert,2);
+			Paux = Paux + VsampConvert*CSampConvert;
+			Qaux = Qaux + VsampConvert*CSampDefConvert;
+			//printf("V: %d\n C1: %d\n",buff_V[i2],buff_C1[i2] );
+			//printf("V en buffer: %d\n",(int)buff_V[i2]);
+			//printf("Paux: %d\n",(int)Paux);
+
 
 		}
 
@@ -353,7 +362,7 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 		r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
 		r.p=Paux/(TAM_VENTANA-50);
 		r.q=Qaux/(TAM_VENTANA-50);
-		r.s=sqrtf(r.p*r.p+r.q*r.q);
+		r.s=r.Vrms*r.Irms;
 		r.fp=r.p/r.s;
 
 		printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
