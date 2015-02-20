@@ -41,6 +41,9 @@
 
 /*Agregados NS---------------------------*/
 
+//#undef CLOCK_CONF_SECOND
+//#define CLOCK_CONF_SECOND 1024UL
+
 #undef COLLECT_NBR_TABLE_CONF_MAX_NEIGHBORS
 #define COLLECT_NBR_TABLE_CONF_MAX_NEIGHBORS 4
 

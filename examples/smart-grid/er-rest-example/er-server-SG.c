@@ -306,12 +306,12 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 	  static uint16_t i2=0;
 	  //printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
 	  SENSORS_ACTIVATE(phidgets);
-	  etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
+	  etimer_set(&tmuestreo, 1);
 	  for (i1=0; i1<TAM_VENTANA; i1++) {
 			// Timer y período de muestreo:
 			PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
-			etimer_set(&tmuestreo, PERIODO_MUESTREO * CLOCK_SECOND);
-
+			etimer_set(&tmuestreo, 1);
+			//printf("Ticks: %d\n",(int)((PERIODO_MUESTREO) * CLOCK_SECOND));
 			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1);
 			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2);
 			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE);
@@ -343,12 +343,17 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 
 
 		for (i2=0; i2<TAM_VENTANA-50; i2++){
-			VSampConvert = buff_V[i2]*VREF/4096-VDC;
-			printf("V sin convertir: %d\n",(int)(buff_V[i2]));
-			printf("V convertido con continua x100: %d\n",(int)(100*buff_V[i2]*VREF/4096));
-			printf("V convertido sin continua x100: %d\n",(int)(VSampConvert*100));
-			CSampConvert = buff_C1[i2]*VREF/4096-VDC;
-			CSampDefConvert = buff_C1[i2+50]*VREF/4096-VDC;
+			VSampConvert = ((buff_V[i2]*VREF)/4096.0)-VDC;
+			//printf("V sin convertir: %d\n",(int)(buff_V[i2]));
+			//printf("V convertido con continua x100: %d\n",(int)(100*buff_V[i2]*VREF/4096));
+			//printf("V convertido sin continua x100: %d\n",(int)(VSampConvert*100));
+			CSampConvert = ((buff_C1[i2]*VREF)/4096.0)-VDC;
+			//printf("I sin convertir: %d\n",(int)(buff_C1[i2]));
+			//printf("I convertido con continua x100: %d\n",(int)(buff_C1[i2]*VREF));
+			//printf("I convertido con continua x100: %d\n",(int)((buff_C1[i2]*VREF)/4096.0));
+			//printf("I convertido con continua x100: %d\n",(int)(((buff_C1[i2]*VREF)/4096.0)*100));
+			//printf("I convertido sin continua x100: %d\n",(int)(CSampConvert*100));
+			CSampDefConvert = ((buff_C1[i2+50]*VREF)/4096.0)-VDC;
 
 			VrmsAux = VrmsAux+powf(VSampConvert,2);
 			IrmsAux = IrmsAux+powf(CSampConvert,2);
