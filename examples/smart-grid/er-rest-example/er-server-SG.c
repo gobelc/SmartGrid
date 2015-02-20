@@ -61,6 +61,8 @@
 #define PERIODO_MUESTREO 1/128 //128 es la máxima resolución (div de seg) que se alcanza con los timers estandar
 #define TIEMPO_ENTRE_MEDIDAS 5
 
+#define VDC 1.0 //Tensión de continua de referencia que manda la placa de preprocesamiento.
+
 //-------------------------------------------
 
 #if PLATFORM_HAS_BUTTON
@@ -335,20 +337,23 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 		Paux=0;
 		Qaux=0;
 		//Variables auxiliares para almacenar muestras en float y pasadas a voltaje.
-		static float VsampConvert;
+		static float VSampConvert;
 		static float CSampConvert;
 		static float CSampDefConvert;
 
 
 		for (i2=0; i2<TAM_VENTANA-50; i2++){
-			VsampConvert = buff_V[i2]*VREF/4096;
-			CSampConvert = buff_C1[i2]*VREF/4096;
-			CSampDefConvert = buff_C1[i2+50]*VREF/4096;
+			VSampConvert = buff_V[i2]*VREF/4096-VDC;
+			printf("V sin convertir: %d\n",(int)(buff_V[i2]));
+			printf("V convertido con continua x100: %d\n",(int)(100*buff_V[i2]*VREF/4096));
+			printf("V convertido sin continua x100: %d\n",(int)(VSampConvert*100));
+			CSampConvert = buff_C1[i2]*VREF/4096-VDC;
+			CSampDefConvert = buff_C1[i2+50]*VREF/4096-VDC;
 
-			VrmsAux = VrmsAux+powf(VsampConvert,2);
+			VrmsAux = VrmsAux+powf(VSampConvert,2);
 			IrmsAux = IrmsAux+powf(CSampConvert,2);
-			Paux = Paux + VsampConvert*CSampConvert;
-			Qaux = Qaux + VsampConvert*CSampDefConvert;
+			Paux = Paux + VSampConvert*CSampConvert;
+			Qaux = Qaux + VSampConvert*CSampDefConvert;
 			//printf("V: %d\n C1: %d\n",buff_V[i2],buff_C1[i2] );
 			//printf("V en buffer: %d\n",(int)buff_V[i2]);
 			//printf("Paux: %d\n",(int)Paux);
@@ -365,7 +370,7 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 		r.s=r.Vrms*r.Irms;
 		r.fp=r.p/r.s;
 
-		printf("VRMS:  %d \n IRMS:  %d \n P:  %d \n Q:  %d \n S:  %d \n FP: %d \n",(int)r.Vrms,(int)r.Irms,(int)r.p,(int)r.q,(int)r.s,(int)r.fp);
+		printf("VRMS (x100):  %d \n IRMS (x100):  %d \n P (x100):  %d \n Q (x100):  %d \n S(x100):  %d \n FP (x100): %d \n",(int)(r.Vrms*100),(int)(r.Irms*100),(int)(r.p*100),(int)(r.q*100),(int)(r.s*100),(int)(r.fp*100));
 		//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
 
 
