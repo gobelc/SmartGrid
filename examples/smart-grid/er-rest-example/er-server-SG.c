@@ -56,12 +56,13 @@
 #define SENSOR_CORRIENTE_1 0
 #define SENSOR_CORRIENTE_2 0
 #define SENSOR_VOLTAJE 3
-#define VREF 5
+#define VREF5 5
+#define VREF3 3
 #define TAM_VENTANA 250 
 #define PERIODO_MUESTREO 1/128 //128 es la máxima resolución (div de seg) que se alcanza con los timers estandar
 #define TIEMPO_ENTRE_MEDIDAS 5
 
-#define VDC 1.0 //Tensión de continua de referencia que manda la placa de preprocesamiento.
+#define VDC 1.55 //Tensión de continua de referencia que manda la placa de preprocesamiento.
 
 //-------------------------------------------
 
@@ -343,17 +344,17 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
 
 
 		for (i2=0; i2<TAM_VENTANA-50; i2++){
-			VSampConvert = ((buff_V[i2]*VREF)/4096.0)-VDC;
+			VSampConvert = ((buff_V[i2]*VREF3)/4096.0)-VDC;
 			//printf("V sin convertir: %d\n",(int)(buff_V[i2]));
 			//printf("V convertido con continua x100: %d\n",(int)(100*buff_V[i2]*VREF/4096));
 			//printf("V convertido sin continua x100: %d\n",(int)(VSampConvert*100));
-			CSampConvert = ((buff_C1[i2]*VREF)/4096.0)-VDC;
+			CSampConvert = ((buff_C1[i2]*VREF5)/4096.0)-VDC;
 			//printf("I sin convertir: %d\n",(int)(buff_C1[i2]));
 			//printf("I convertido con continua x100: %d\n",(int)(buff_C1[i2]*VREF));
 			//printf("I convertido con continua x100: %d\n",(int)((buff_C1[i2]*VREF)/4096.0));
 			//printf("I convertido con continua x100: %d\n",(int)(((buff_C1[i2]*VREF)/4096.0)*100));
 			//printf("I convertido sin continua x100: %d\n",(int)(CSampConvert*100));
-			CSampDefConvert = ((buff_C1[i2+50]*VREF)/4096.0)-VDC;
+			CSampDefConvert = ((buff_C1[i2+50]*VREF5)/4096.0)-VDC;
 
 			VrmsAux = VrmsAux+powf(VSampConvert,2);
 			IrmsAux = IrmsAux+powf(CSampConvert,2);
