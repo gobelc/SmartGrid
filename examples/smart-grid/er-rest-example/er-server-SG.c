@@ -36,15 +36,24 @@
  *      Matthias Kovatsch <kovatsch@inf.ethz.ch>
  */
 
-/*este es el nuevo*/
+/*NODO DE MEDICION Y CARGA:
+ *Se trata de un servidor CoAP que cumple dos funciones fundamentales:
+ *1- Medición y reporte de datos hacia el controlador central
+ *2- Control de la carga en base a instrucciónes recibidas de parte del controlador central
+ *
+ *La estructura de comunicación está hecha en base al ejemplo er-example-server.c. Utiliza 6LoWPAN ruteado con RPL
+ *y CoAP a nivel de aplicación
+ */
 
-#include <stdio.h>
+
+//#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "contiki.h"
 #include "contiki-net.h"
 #include "rest-engine.h"
 #include "interface.h"
+#include "sys/rtimer.h"
 
 //---------------Metering--------------------
 #include "core/cfs/cfs.h"
@@ -56,11 +65,13 @@
 #define SENSOR_CORRIENTE_1 0
 #define SENSOR_CORRIENTE_2 0
 #define SENSOR_VOLTAJE 3
-#define VREF5 5
-#define VREF3 3
-#define TAM_VENTANA 250 
-#define PERIODO_MUESTREO 1/128 //128 es la máxima resolución (div de seg) que se alcanza con los timers estandar
-#define TIEMPO_ENTRE_MEDIDAS 5
+#define VREF5 5 //Tensión de referencia para sensores de 5V
+#define VREF3 3 //Tensión de referencia para sensores de 3V
+#define TAM_VENTANA 250 //Cantidad de muestras tomadas en un muestreo
+#define OVERLAP_VENTANA 50 //Muestras solapadas para cálculo de potencia reactiva
+#define PERIODO_MUESTREO 50 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
+#define MILISEG_POR_TICK 0.030518 //Cada tick equivale a 0.030518 msegs
+#define TIEMPO_ENTRE_MEDIDAS 3 //Cada cuanto tiempo se realiza una medición.
 
 #define VDC 1.55 //Tensión de continua de referencia que manda la placa de preprocesamiento.
 
@@ -70,6 +81,7 @@
 #include "dev/button-sensor.h"
 #endif
 
+//Opción para debug estándar de Contiki
 #define DEBUG 0
 #if DEBUG
 #include <stdio.h>
@@ -80,6 +92,25 @@
 #define PRINTF(...)
 #define PRINT6ADDR(addr)
 #define PRINTLLADDR(addr)
+#endif
+
+//Opción para activar reporte de muestras adquiridas
+#define DEBUG_MUESTRAS 1
+#if DEBUG_MUESTRAS
+#include <stdio.h>
+#define PRINT_MUESTRAS(...) printf(__VA_ARGS__)
+#define CON_MUESTRAS
+#else
+#define CON_MUESTRAS //
+#define PRINT_MUESTRAS(...)
+#endif
+
+//Opción para activar interface con el usuario y reporte de medidas por serial
+#if !DEBUG_MUESTRAS
+#include <stdio.h>
+#define PRINT_STD(...) printf(__VA_ARGS__)
+#else
+#define PRINT_STD(...)
 #endif
 
 /*
@@ -96,8 +127,7 @@ extern resource_t res_put_SG;
 PROCESS(er_server, "Smart Grid Server Node");
 AUTOSTART_PROCESSES(&er_server);
 
-// INICIALIZACION DE VARIABLES
-
+/*---------------------DECLARACIÓN DE VARIABLES----------------------------*/
 
 static double Gi1=1; //Ganancia V/A Amplificador n°1 corriente
 static double Gi2=1; //Ganancia V/A Amplificador n°2 corriente
@@ -106,12 +136,12 @@ static double Gv=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
 static double CurrentThreshold=2.3; //¿Qué es?
 static double B[251]; //¿Qué es?
 
-static float Vrms=0;
-static float Irms=0;
-static float p=0;
-static float q=0;
-static float s=0;
-static float fp=0;
+static float Vrms=0; //BORRAR?????????
+static float Irms=0; //BORRAR?????????
+static float p=0; //BORRAR?????????
+static float q=0; //BORRAR?????????
+static float s=0; //BORRAR?????????
+static float fp=0; //BORRAR?????????
 
 
 static int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
@@ -122,8 +152,19 @@ static double coef_2=1/4;
 static double coef_3=1/4;
 static double coef_4=1/4;
 
+//Buffers que contienen los valores muestreados
+static uint16_t buff_C1[TAM_VENTANA];
+static uint16_t buff_C2[TAM_VENTANA];
+static uint16_t buff_Corr[TAM_VENTANA];
+static uint16_t buff_V[TAM_VENTANA];
+static uint16_t buff_Time_Stamp[TAM_VENTANA];
 
+static int muestra; //Contiene el número de muesta actual durante el muestreo
 
+static struct rtimer tmuestreo; //Timer de tiempo real que genera interrupciones para tomar las muestras (cuenta el período de muestreo)
+static struct etimer periodico; //Timer utilizado para contar tiempos entre mediciones
+
+//Estructura que contiene los valores definitivos (calculos finales) de las variables medidas
 typedef struct Medida {
 	float Vrms;
 	float Irms;
@@ -133,11 +174,11 @@ typedef struct Medida {
 	float fp;
 } Medida;
 
-//------------------FIN Declaraciones metering--------------------------------------
+/*---------------------FIN DECLARACIÓN DE VARIABLES----------------------------*/
 
-
-// Funciones Metering
-
+/*------------------------------------------------------------------------------*/
+/*----------------------------FUNCIONES MEDICIÓN--------------------------------*/
+/*------------------------------------------------------------------------------*/
 
 void shift(double a[], int n) {
  	 	     int i;
@@ -227,41 +268,67 @@ return deltaN;
 		return 2*y; // Ajusto ganancia del filtro, dado que modulo de h[n]=1/2.
  }
 
-//------------Fin funciones metering-------------------------
+ /*FUNCIÓN muestreo: Al ser llamada esta función se encarga de tomar una tanda de muestras. Además, mientras no se
+  * haya completado la totalidad de las muestras, la propia función agenda una próxima ejecución de ella misma
+  * a través de un rtimer, un PERIODO_MUESTREO despues de la ejecución actual. De esta manera las muestras se toman
+  * regularmente y a gran velocidad. Al llegar a la última muestra, la función le postea un evento poll al proceso
+  * principal, y el mismo continúa.
+  */
 
+ static char muestreo(struct rtimer *rt, void* ptr){
+
+	 if (muestra < TAM_VENTANA){
+
+		 uint8_t ret;
+		 ret = rtimer_set(&tmuestreo, RTIMER_NOW()+PERIODO_MUESTREO, 1, (void (*)(struct rtimer *, void *))muestreo, NULL);
+		 if(ret){
+			 PRINT_STD("Error Timer: %u\n", ret);
+		 }
+	 }
+	 else {
+		 process_poll(&er_server);
+	 }
+
+	 //Se realiza la lectura de los diferentes sensores. Esto es, se toman las muestras:
+	 buff_C1[muestra] = phidgets.value(SENSOR_CORRIENTE_1);
+	 buff_C2[muestra] = phidgets.value(SENSOR_CORRIENTE_2);
+	 buff_V[muestra] = phidgets.value(SENSOR_VOLTAJE);
+
+#if DEBUG_MUESTRAS
+	 buff_Time_Stamp[muestra] = RTIMER_NOW();
+#endif
+
+	 muestra++; //Incremento la cuenta de muestra actual
+
+	 return 1;
+
+ }
+
+ /*----------------------------FIN FUNCIONES MEDICIÓN-----------------------------*/
+
+
+
+ /*------------------------------------------------------------------------------*/
+ /*-----------------------------------PROCESOS-----------------------------------*/
+ /*------------------------------------------------------------------------------*/
+
+//Thred del proceso principal
 PROCESS_THREAD(er_server, ev, data)
 {
 
-	int i;
-
-	static uint16_t buff_C1[TAM_VENTANA];
-	static uint16_t buff_C2[TAM_VENTANA];
-	static uint16_t buff_Corr[TAM_VENTANA];
-	static uint16_t buff_V[TAM_VENTANA];
-	static uint16_t *buff_ptrC1;
-	static uint16_t *buff_ptrC2;
-	static uint16_t *buff_ptrV;
-
-	static struct etimer tmuestreo;
-
-	static struct etimer periodico;
-
-
   PROCESS_BEGIN();
 
+  extern const struct sensors_sensor phidgets;
 
-	extern const struct sensors_sensor phidgets;
+  PRINT_STD("\n");
+  PRINT_STD("----------------------------------------\n");
+  PRINT_STD("Iniciando funciones de medicion...\n");
+  PRINT_STD("----------------------------------------\n");
 
-	buff_ptrC1 = buff_C1;
-	buff_ptrC2 = buff_C2;
-	buff_ptrV = buff_V;
+  etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //Expirado este tiempo se realizará la primer medición
 
-printf("Realizando la lectura inicial...");
+//----------Tareas de diagnóstico y comunicación------------------
 
-etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizador a 1 min.
-
-//----------Funciones de diagnóstico, información y auxiliares------------------
-//------------------------------------------------------------------------------
   PROCESS_PAUSE();
 
   PRINTF("Starting Smart Grid Server\n");
@@ -292,100 +359,126 @@ etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //seteo el temporizad
   rest_activate_resource(&res_event_SG, "reportes/prueba_ev");
   rest_activate_resource(&res_put_SG, "reportes/prueba_put");
 
-  /* Define application-specific events here. */
+//--------FIN Tareas de diagnóstico y comunicación----------------
 
-//--------FIN Funciones de diagnóstico, información y auxiliares----------------
-//------------------------------------------------------------------------------
 
+//PRINT_STD("por entrar por 1ra vez al while\n"); //DEBUG
 
   while(1) {
 
-	  PROCESS_WAIT_UNTIL(etimer_expired(&periodico));
+	PROCESS_WAIT_UNTIL(etimer_expired(&periodico)); //Cuando este temporizador expira, se comienza una nueva medición
+	//PRINT_STD("Expiro periodico; arrancando el while\n"); //DEBUG
 
-	  etimer_reset(&periodico);
-	  static uint16_t i1=0;
-	  static uint16_t i2=0;
-	  //printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
-	  SENSORS_ACTIVATE(phidgets);
-	  etimer_set(&tmuestreo, 1);
-	  for (i1=0; i1<TAM_VENTANA; i1++) {
-			// Timer y período de muestreo:
-			PROCESS_WAIT_UNTIL(etimer_expired(&tmuestreo));
-			etimer_set(&tmuestreo, 1);
-			//printf("Ticks: %d\n",(int)((PERIODO_MUESTREO) * CLOCK_SECOND));
-			*buff_ptrC1 = phidgets.value(SENSOR_CORRIENTE_1);
-			*buff_ptrC2 = phidgets.value(SENSOR_CORRIENTE_2);
-			*buff_ptrV = phidgets.value(SENSOR_VOLTAJE);
+	/*Al comenzar la nueva medición, lo primero que hago es resetear el timer, de modo de garantizar que el tiempo
+	*entre muestras se respete independientemente del tiempo insumido por las operaciones siguientes.
+	*/
+	etimer_reset(&periodico);
 
-			//printf("ContBuffV: %d, ContPtrV: %d\n DirBuffV: %d, DirPtrV: %d\n Voltaje: %d\n",buff_V[i1],*buff_ptrV, &buff_V[i1],buff_ptrV,voltaje);
-			buff_ptrC1++;
-			buff_ptrC2++;
-			buff_ptrV++;
+	static uint16_t i=0; //Variable auxiliar para for
+	muestra = 1; //Inicializo el número de muestra actual
+
+	SENSORS_ACTIVATE(phidgets); //Activo sensores
+	//PRINT_STD("me meto por 1ra vez a muestreo\n"); //DEBUG
+
+	char status_timer = muestreo(&tmuestreo, NULL); //Disparo el primer muestreo, luego sigue por autoinvocación
+
+	/*Mientras se muestrea, el proceso quedará detenido en esta línea. Cuando se tome la última muestra,
+	*la función "muestreo" hará un poll de este proceso y lo destrancará...
+	*/
+	PROCESS_WAIT_UNTIL(ev == PROCESS_EVENT_POLL);
+	SENSORS_DEACTIVATE(phidgets); //Desactivo sensores
+
+	//Esta raya la imprimo por efecto visual, para que se note cuando llega una nueva medida en la consola
+	PRINT_STD("\n");
+	PRINT_STD("----------------------------------------\n");
+	//PRINT_STD("termino muestreo\n"); //DEBUG
+
+	//Variables auxiliares para cálculos
+	static float VrmsAux=0;
+	static float IrmsAux=0;
+	static float Paux=0;
+	static float Qaux=0;
+
+	//Inicializo variables auxiliares
+	VrmsAux=0;
+	IrmsAux=0;
+	Paux=0;
+	Qaux=0;
+
+	//Variables auxiliares para almacenar muestras en float y pasadas a voltaje.
+	static float V_Samp_Volts; //Muestras de V pasadas a Volts
+	static float C_Samp_Volts; //Muestras de C pasadas a volts
+	static float C_Samp_Defasada_Volts; //Muestras de C desfasada pasadas a Volts
+	static float Time_Stamp_mS; //Time stamp de cada muestra en usegundos.
+	static int Time_Stamp_mS_Parte_Entera;
+	static int Time_Stamp_mS_Parte_Decimal;
+	static char Aux_Time_hay_Overflow;
+
+	Aux_Time_hay_Overflow = 0; //Inicializo el flag de overflow
+
+	PRINT_MUESTRAS("\n\n\n");
+	PRINT_MUESTRAS("Tension [mV]; Corriente [mV]; Time stamp [mS];\n\n");
+	//Para cada muestra calculo el valor medido por el sensor en VOLTS
+	for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
+
+		V_Samp_Volts = ((buff_V[i]*VREF3)/4096.0)-VDC;
+		C_Samp_Volts = ((buff_C1[i]*VREF5)/4096.0)-VDC;
+		C_Samp_Defasada_Volts = ((buff_C1[i+OVERLAP_VENTANA]*VREF5)/4096.0)-VDC;
+
+/*Esta parte solo es necesaria cuando se quieren ver las muestras una a una con time stamp*/
+#if DEBUG_MUESTRAS
+		if((buff_Time_Stamp[i] < buff_Time_Stamp[i-1])&&(Aux_Time_hay_Overflow=0)){
+			Aux_Time_hay_Overflow=1;
+		}
+		if(Aux_Time_hay_Overflow){
+			Time_Stamp_mS = (buff_Time_Stamp[i]-buff_Time_Stamp[1]+65536)*MILISEG_POR_TICK; //Calculo el tiempo en mS a partir de 0uS
+		}
+		else{
+			Time_Stamp_mS = (buff_Time_Stamp[i]-buff_Time_Stamp[1])*MILISEG_POR_TICK; //Calculo el tiempo en mS a partir de 0uS
 		}
 
-		//Luego de obtenidas todas las muestras, se vuelve el puntero al inicio.
-		buff_ptrC1 = buff_C1;
-		buff_ptrC2 = buff_C2;
-		buff_ptrV = buff_V;
+		//Artilugio para imprimir decimales
+		Time_Stamp_mS_Parte_Entera = floor(Time_Stamp_mS);
+		Time_Stamp_mS_Parte_Decimal = (int)((Time_Stamp_mS-Time_Stamp_mS_Parte_Entera) * 10000); //Me quedo con 4 decimales
 
-		static float VrmsAux=0;
-		static float IrmsAux=0;
-		static float Paux=0;
-		static float Qaux=0;
+		PRINT_MUESTRAS("%d; %d; %d.%d;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),Time_Stamp_mS_Parte_Entera,Time_Stamp_mS_Parte_Decimal);
+#endif
 
-		VrmsAux=0;
-		IrmsAux=0;
-		Paux=0;
-		Qaux=0;
-		//Variables auxiliares para almacenar muestras en float y pasadas a voltaje.
-		static float VSampConvert;
-		static float CSampConvert;
-		static float CSampDefConvert;
+		/*IMPORTANTE: Acá falta incluir la elección de sensor de corriente y también falta
+		hacer el cálculo de la corriente a partir del voltaje. Como está hecho hoy, la medición de
+		corriente me da un valor de tensión, pero en ningún lado está la relación tensión-corriente
+		que impone la placa preprocesadora*/
+		VrmsAux = VrmsAux+powf(V_Samp_Volts,2);
+		IrmsAux = IrmsAux+powf(C_Samp_Volts,2);
+		Paux = Paux + V_Samp_Volts*C_Samp_Volts;
+		Qaux = Qaux + V_Samp_Volts*C_Samp_Defasada_Volts;
 
+	} //fin del for
 
-		for (i2=0; i2<TAM_VENTANA-50; i2++){
-			VSampConvert = ((buff_V[i2]*VREF3)/4096.0)-VDC;
-			//printf("V sin convertir: %d\n",(int)(buff_V[i2]));
-			//printf("V convertido con continua x100: %d\n",(int)(100*buff_V[i2]*VREF/4096));
-			//printf("V convertido sin continua x100: %d\n",(int)(VSampConvert*100));
-			CSampConvert = ((buff_C1[i2]*VREF5)/4096.0)-VDC;
-			//printf("I sin convertir: %d\n",(int)(buff_C1[i2]));
-			//printf("I convertido con continua x100: %d\n",(int)(buff_C1[i2]*VREF));
-			//printf("I convertido con continua x100: %d\n",(int)((buff_C1[i2]*VREF)/4096.0));
-			//printf("I convertido con continua x100: %d\n",(int)(((buff_C1[i2]*VREF)/4096.0)*100));
-			//printf("I convertido sin continua x100: %d\n",(int)(CSampConvert*100));
-			CSampDefConvert = ((buff_C1[i2+50]*VREF5)/4096.0)-VDC;
+	struct Medida r; //Calculo los valores finales y los guardo en la estructura
 
-			VrmsAux = VrmsAux+powf(VSampConvert,2);
-			IrmsAux = IrmsAux+powf(CSampConvert,2);
-			Paux = Paux + VSampConvert*CSampConvert;
-			Qaux = Qaux + VSampConvert*CSampDefConvert;
-			//printf("V: %d\n C1: %d\n",buff_V[i2],buff_C1[i2] );
-			//printf("V en buffer: %d\n",(int)buff_V[i2]);
-			//printf("Paux: %d\n",(int)Paux);
+	r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
+	r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
+	r.p=Paux/(TAM_VENTANA-OVERLAP_VENTANA);
+	r.q=Qaux/(TAM_VENTANA-OVERLAP_VENTANA);
+	r.s=r.Vrms*r.Irms;
+	r.fp=r.p/r.s;
 
+	//Se imprimen todos los valores medidos
 
-		}
+	PRINT_STD("Medicion de Energia:\n");
+	PRINT_STD("----------------------------------------\n");
+	PRINT_STD("VRMS: %d [mV]\nIRMS: %d [mA]\nP: %d [mW]\nQ: %d [mVAR]\nS: %d [mVA]\nFP (%): %d\n",(int)(r.Vrms*1000),(int)(r.Irms*1000),(int)(r.p*1000),(int)(r.q*1000),(int)(r.s*1000),(int)(r.fp*100));
+	PRINT_STD("----------------------------------------\n");
 
-		struct Medida r;
+	/*-----------------------------COAP---------------------------------
+	 * Paso todas las mediciones a variables vinculadas a recursos CoAP
+	 */
+	dato_get=(int32_t)(r.Vrms);
 
-		r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-50));
-		r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-50));
-		r.p=Paux/(TAM_VENTANA-50);
-		r.q=Qaux/(TAM_VENTANA-50);
-		r.s=r.Vrms*r.Irms;
-		r.fp=r.p/r.s;
+	/*--------------------------FIN COAP---------------------------------*/
 
-		printf("VRMS (x100):  %d \n IRMS (x100):  %d \n P (x100):  %d \n Q (x100):  %d \n S(x100):  %d \n FP (x100): %d \n",(int)(r.Vrms*100),(int)(r.Irms*100),(int)(r.p*100),(int)(r.q*100),(int)(r.s*100),(int)(r.fp*100));
-		//printf("VRMS: %ld.%03d mV)\n", (long) Vrms,(unsigned) ((Vrms - floor(Vrms)) * 1000));
-
-
-		dato_get=(int32_t)(r.Vrms);
-
-
-
-	  }  /* while (1) */
-
+  }  /* while (1) */
 
 
   PROCESS_END();
