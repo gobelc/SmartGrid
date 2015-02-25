@@ -367,7 +367,6 @@ PROCESS_THREAD(er_server, ev, data)
   while(1) {
 
 	PROCESS_WAIT_UNTIL(etimer_expired(&periodico)); //Cuando este temporizador expira, se comienza una nueva medición
-	//PRINT_STD("Expiro periodico; arrancando el while\n"); //DEBUG
 
 	/*Al comenzar la nueva medición, lo primero que hago es resetear el timer, de modo de garantizar que el tiempo
 	*entre muestras se respete independientemente del tiempo insumido por las operaciones siguientes.
@@ -378,7 +377,6 @@ PROCESS_THREAD(er_server, ev, data)
 	muestra = 1; //Inicializo el número de muestra actual
 
 	SENSORS_ACTIVATE(phidgets); //Activo sensores
-	//PRINT_STD("me meto por 1ra vez a muestreo\n"); //DEBUG
 
 	char status_timer = muestreo(&tmuestreo, NULL); //Disparo el primer muestreo, luego sigue por autoinvocación
 
