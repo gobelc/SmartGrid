@@ -45,15 +45,20 @@
  *y CoAP a nivel de aplicación
  */
 
-
 //#include <stdio.h>
+//--------------Includes generales------------
 #include <stdlib.h>
 #include <string.h>
 #include "contiki.h"
 #include "contiki-net.h"
 #include "rest-engine.h"
-#include "interface.h"
 #include "sys/rtimer.h"
+
+/*--------------------------------------------------------------------------------------------------*/
+#define ARCHIVO_PRINCIPAL
+#include "variables_globales.h"
+
+/*--------------------------------------------------------------------------------------------------*/
 
 //---------------Metering--------------------
 #include "core/cfs/cfs.h"
@@ -61,6 +66,8 @@
 #include "lib/sensors.h"
 #include "dev/leds.h"
 #include "dev/z1-phidgets.h"
+#include "dev/relay-phidget.h"
+#include "dev/button-sensor.h"
 
 #define SENSOR_CORRIENTE_1 0
 #define SENSOR_CORRIENTE_2 0
@@ -69,17 +76,20 @@
 #define VREF3 3 //Tensión de referencia para sensores de 3V
 #define TAM_VENTANA 250 //Cantidad de muestras tomadas en un muestreo
 #define OVERLAP_VENTANA 50 //Muestras solapadas para cálculo de potencia reactiva
-#define PERIODO_MUESTREO 50 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
+#define PERIODO_MUESTREO 32 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
 #define MILISEG_POR_TICK 0.030518 //Cada tick equivale a 0.030518 msegs
 #define TIEMPO_ENTRE_MEDIDAS 3 //Cada cuanto tiempo se realiza una medición.
 
-#define VDC 1.55 //Tensión de continua de referencia que manda la placa de preprocesamiento.
+#define OFFSET_MOTE_3V 0.0215 //Por experimento vimos que el mote mete un offset (mV)
+#define OFFSET_MOTE_5V 0.054 //Por experimento vimos que el mote mete un offset (mV)
+#define VDC_3V (1 - OFFSET_MOTE_3V)//Tensión de continua de referencia que manda la placa de preprocesamiento.0.0215
+#define VDC_5V (1 - OFFSET_MOTE_5V)//Tensión de continua de referencia que manda la placa de preprocesamiento.0.0215
+
+#define P6_DO_RELAY_0 2 //Salida del relay 0 (P6.x)
+#define P6_DO_RELAY_1 4 //Salida del relay 1 (P6.x)
+
 
 //-------------------------------------------
-
-#if PLATFORM_HAS_BUTTON
-#include "dev/button-sensor.h"
-#endif
 
 //Opción para debug estándar de Contiki
 #define DEBUG 0
@@ -95,7 +105,7 @@
 #endif
 
 //Opción para activar reporte de muestras adquiridas
-#define DEBUG_MUESTRAS 1
+#define DEBUG_MUESTRAS 0
 #if DEBUG_MUESTRAS
 #include <stdio.h>
 #define PRINT_MUESTRAS(...) printf(__VA_ARGS__)
@@ -106,7 +116,8 @@
 #endif
 
 //Opción para activar interface con el usuario y reporte de medidas por serial
-#if !DEBUG_MUESTRAS
+#define PRINT_STANDARD 0
+#if (!DEBUG_MUESTRAS && PRINT_STANDARD)
 #include <stdio.h>
 #define PRINT_STD(...) printf(__VA_ARGS__)
 #else
@@ -118,14 +129,13 @@
  * The build system automatically compiles the resources in the corresponding sub-directory.
  */
 
-extern resource_t res_get_SG;
-extern resource_t res_obs_SG;
-extern resource_t res_event_SG;
-extern resource_t res_put_SG;
+extern resource_t res_mediciones_SG;
+extern resource_t res_comando_SG;
 
-
-PROCESS(er_server, "Smart Grid Server Node");
-AUTOSTART_PROCESSES(&er_server);
+PROCESS(comunicacion, "HAN Smart Grid node");
+PROCESS(medicion, "Medicion de consumo");
+PROCESS(control_carga, "Control de Carga");
+AUTOSTART_PROCESSES(&comunicacion, &medicion, &control_carga);
 
 /*---------------------DECLARACIÓN DE VARIABLES----------------------------*/
 
@@ -164,15 +174,7 @@ static int muestra; //Contiene el número de muesta actual durante el muestreo
 static struct rtimer tmuestreo; //Timer de tiempo real que genera interrupciones para tomar las muestras (cuenta el período de muestreo)
 static struct etimer periodico; //Timer utilizado para contar tiempos entre mediciones
 
-//Estructura que contiene los valores definitivos (calculos finales) de las variables medidas
-typedef struct Medida {
-	float Vrms;
-	float Irms;
-	float q;
-	float p;
-	float s;
-	float fp;
-} Medida;
+
 
 /*---------------------FIN DECLARACIÓN DE VARIABLES----------------------------*/
 
@@ -286,7 +288,7 @@ return deltaN;
 		 }
 	 }
 	 else {
-		 process_poll(&er_server);
+		 process_poll(&medicion);
 	 }
 
 	 //Se realiza la lectura de los diferentes sensores. Esto es, se toman las muestras:
@@ -313,7 +315,54 @@ return deltaN;
  /*------------------------------------------------------------------------------*/
 
 //Thred del proceso principal
-PROCESS_THREAD(er_server, ev, data)
+PROCESS_THREAD(comunicacion, ev, data)
+{
+
+	PROCESS_BEGIN();
+
+	//----------Tareas de diagnóstico y comunicación------------------
+
+	PROCESS_PAUSE();
+
+	PRINTF("Starting Smart Grid Server\n");
+
+#ifdef RF_CHANNEL
+	PRINTF("RF channel: %u\n", RF_CHANNEL);
+#endif
+#ifdef IEEE802154_PANID
+	PRINTF("PAN ID: 0x%04X\n", IEEE802154_PANID);
+#endif
+
+	PRINTF("uIP buffer: %u\n", UIP_BUFSIZE);
+	PRINTF("LL header: %u\n", UIP_LLH_LEN);
+	PRINTF("IP+UDP header: %u\n", UIP_IPUDPH_LEN);
+	PRINTF("REST max chunk: %u\n", REST_MAX_CHUNK_SIZE);
+
+	/* Initialize the REST engine. */
+	rest_init_engine();
+
+	/*
+	 * Bind the resources to their Uri-Path.
+	 * WARNING: Activating twice only means alternate path, not two instances!
+	 * All static variables are the same for each URI path.
+	 */
+
+	/*Activo los recursos que voy a utilizar*/
+	rest_activate_resource(&res_mediciones_SG, "Reportes/Mediciones");
+	rest_activate_resource(&res_comando_SG, "Comandos/Relays");
+
+//--------FIN Tareas de diagnóstico y comunicación----------------
+
+
+	/*while(1){
+		/*En este proceso no se hace ninguna tarea periodica. Solo es importante en el arranque.
+	}*/
+
+	PROCESS_END();
+}
+
+//Thred del proceso de medicion
+PROCESS_THREAD(medicion, ev, data)
 {
 
   PROCESS_BEGIN();
@@ -326,41 +375,6 @@ PROCESS_THREAD(er_server, ev, data)
   PRINT_STD("----------------------------------------\n");
 
   etimer_set(&periodico, TIEMPO_ENTRE_MEDIDAS*CLOCK_SECOND); //Expirado este tiempo se realizará la primer medición
-
-//----------Tareas de diagnóstico y comunicación------------------
-
-  PROCESS_PAUSE();
-
-  PRINTF("Starting Smart Grid Server\n");
-
-#ifdef RF_CHANNEL
-  PRINTF("RF channel: %u\n", RF_CHANNEL);
-#endif
-#ifdef IEEE802154_PANID
-  PRINTF("PAN ID: 0x%04X\n", IEEE802154_PANID);
-#endif
-
-  PRINTF("uIP buffer: %u\n", UIP_BUFSIZE);
-  PRINTF("LL header: %u\n", UIP_LLH_LEN);
-  PRINTF("IP+UDP header: %u\n", UIP_IPUDPH_LEN);
-  PRINTF("REST max chunk: %u\n", REST_MAX_CHUNK_SIZE);
-
-  /* Initialize the REST engine. */
-  rest_init_engine();
-
-  /*
-   * Bind the resources to their Uri-Path.
-   * WARNING: Activating twice only means alternate path, not two instances!
-   * All static variables are the same for each URI path.
-   */
-
-  rest_activate_resource(&res_get_SG, "reportes/prueba_get");
-  rest_activate_resource(&res_obs_SG, "reportes/prueba_obs");
-  rest_activate_resource(&res_event_SG, "reportes/prueba_ev");
-  rest_activate_resource(&res_put_SG, "reportes/prueba_put");
-
-//--------FIN Tareas de diagnóstico y comunicación----------------
-
 
 //PRINT_STD("por entrar por 1ra vez al while\n"); //DEBUG
 
@@ -384,7 +398,8 @@ PROCESS_THREAD(er_server, ev, data)
 	*la función "muestreo" hará un poll de este proceso y lo destrancará...
 	*/
 	PROCESS_WAIT_UNTIL(ev == PROCESS_EVENT_POLL);
-	SENSORS_DEACTIVATE(phidgets); //Desactivo sensores
+	/*SENSORS_DEACTIVATE(phidgets); /*Desactivo sensores. Esta línea quedó comentada porque al desactivar los
+	sensores me desactivaba también los relays.*/
 
 	//Esta raya la imprimo por efecto visual, para que se note cuando llega una nueva medida en la consola
 	PRINT_STD("\n");
@@ -419,9 +434,9 @@ PROCESS_THREAD(er_server, ev, data)
 	//Para cada muestra calculo el valor medido por el sensor en VOLTS
 	for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
 
-		V_Samp_Volts = ((buff_V[i]*VREF3)/4096.0)-VDC;
-		C_Samp_Volts = ((buff_C1[i]*VREF5)/4096.0)-VDC;
-		C_Samp_Defasada_Volts = ((buff_C1[i+OVERLAP_VENTANA]*VREF5)/4096.0)-VDC;
+		V_Samp_Volts = ((buff_V[i]*VREF3)/4096.0)-VDC_3V;
+		C_Samp_Volts = ((buff_C1[i]*VREF5)/4096.0)-VDC_5V;
+		C_Samp_Defasada_Volts = ((buff_C1[i+OVERLAP_VENTANA]*VREF5)/4096.0)-VDC_5V;
 
 /*Esta parte solo es necesaria cuando se quieren ver las muestras una a una con time stamp*/
 #if DEBUG_MUESTRAS
@@ -453,31 +468,107 @@ PROCESS_THREAD(er_server, ev, data)
 
 	} //fin del for
 
-	struct Medida r; //Calculo los valores finales y los guardo en la estructura
+	//struct Medida datos; //Calculo los valores finales y los guardo en la estructura
 
-	r.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
-	r.Irms=sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
-	r.p=Paux/(TAM_VENTANA-OVERLAP_VENTANA);
-	r.q=Qaux/(TAM_VENTANA-OVERLAP_VENTANA);
-	r.s=r.Vrms*r.Irms;
-	r.fp=r.p/r.s;
+	datos.Vrms=sqrtf(VrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
+	datos.Irms=sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA));
+	datos.p=Paux/(TAM_VENTANA-OVERLAP_VENTANA);
+	datos.q=Qaux/(TAM_VENTANA-OVERLAP_VENTANA);
+	datos.s=datos.Vrms*datos.Irms;
+	datos.fp=datos.p/datos.s;
 
 	//Se imprimen todos los valores medidos
 
 	PRINT_STD("Medicion de Energia:\n");
 	PRINT_STD("----------------------------------------\n");
-	PRINT_STD("VRMS: %d [mV]\nIRMS: %d [mA]\nP: %d [mW]\nQ: %d [mVAR]\nS: %d [mVA]\nFP (%): %d\n",(int)(r.Vrms*1000),(int)(r.Irms*1000),(int)(r.p*1000),(int)(r.q*1000),(int)(r.s*1000),(int)(r.fp*100));
+	PRINT_STD("VRMS: %d [mV]\nIRMS: %d [mA]\nP: %d [mW]\nQ: %d [mVAR]\nS: %d [mVA]\nFP (%): %d\n",(int)(datos.Vrms*1000),(int)(datos.Irms*1000),(int)(datos.p*1000),(int)(datos.q*1000),(int)(datos.s*1000),(int)(datos.fp*100));
 	PRINT_STD("----------------------------------------\n");
-
-	/*-----------------------------COAP---------------------------------
-	 * Paso todas las mediciones a variables vinculadas a recursos CoAP
-	 */
-	dato_get=(int32_t)(r.Vrms);
-
-	/*--------------------------FIN COAP---------------------------------*/
 
   }  /* while (1) */
 
 
   PROCESS_END();
 }
+
+//Thread del control de carga
+PROCESS_THREAD(control_carga, ev, data)
+{
+
+#define BEBUG_RELAY 0
+
+  PROCESS_BEGIN();
+
+  /*Selecciono como P6.4 como DO de salida. En este caso estoy usando el cuatro, pero poniendo P6.x puedo acceder
+   * a cualquier otro pin del puerto P6. Si quisiera usar otro puerto con GPIO para no usar ADCs, tendría que
+   * modificar un poco las funciones usadas.
+   */
+
+#if BEBUG_RELAY
+  SENSORS_ACTIVATE(button_sensor);
+#endif
+
+  /*Habilito salidas para ambos relays*/
+  P6SEL &= ~(1 << P6_DO_RELAY_0);
+  P6SEL &= ~(1 << P6_DO_RELAY_1);
+  P6DIR |= (1 << P6_DO_RELAY_0);
+  P6DIR |= (1 << P6_DO_RELAY_1);
+
+  /*Arranco con ambos relays apagados*/
+  P6OUT &= ~(1 << P6_DO_RELAY_0);
+  P6OUT &= ~(1 << P6_DO_RELAY_1);
+  status_relays = 0x00;
+
+  while(1) {
+
+#if BEBUG_RELAY
+	   PROCESS_WAIT_EVENT_UNTIL((ev==sensors_event) && (data == &button_sensor));
+#endif
+	   PROCESS_WAIT_UNTIL(ev == PROCESS_EVENT_POLL);
+	   ev = PROCESS_EVENT_NONE;
+
+	   /*COMANDO DE RELAY 0*/
+	   if ((comando_relays & 0x0F) > 0){
+		   P6OUT |= (1 << P6_DO_RELAY_0); //Enciendo relay 0
+		   status_relays |= 0x0F; //Actualizo estado: relay 0 encendido
+	   }
+	   else{
+		   P6OUT &= ~(1 << P6_DO_RELAY_0); //Apago relay 0
+		   status_relays &= 0xF0; //Actualizo estado: relay 0 apagado
+	   }
+
+	   /*COMANDO DE RELAY 1*/
+	   if ((comando_relays & 0xF0) > 0){
+		   P6OUT |= (1 << P6_DO_RELAY_1); //Enciendo relay 1
+		   status_relays |= 0xF0; //Actualizo estado: relay 1 encendido
+	   }
+	   else{
+		   P6OUT &= ~(1 << P6_DO_RELAY_1); //Apago relay 1
+		   status_relays &= 0x0F; //Actualizo estado: relay 1 apagado
+	   }
+
+	   /*Monitoreo estado y señalizo con LEDs*/
+	   /*LED AZUL = ESTADO R0 | LED VERDE = ESTADO R1*/
+	   if ((status_relays & 0x0F) > 0){
+		   leds_on(LEDS_BLUE);
+	   }
+	   else{
+		   leds_off(LEDS_BLUE);
+	   }
+	   if ((status_relays & 0xF0) > 0){
+		   leds_on(LEDS_GREEN);
+	   }
+	   else{
+		   leds_off(LEDS_GREEN);
+	   }
+
+
+/*SOLO PARA DEBUG*/
+#if BEBUG_RELAY
+	   comando_relays=~comando_relays;
+	   printf("\nComando [%d]\n", comando_relays);
+#endif
+
+  } //End while
+  PROCESS_END();
+}
+

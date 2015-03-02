@@ -46,8 +46,8 @@ static void res_get_handler(void *request, void *response, uint8_t *buffer, uint
 static void res_periodic_handler(void);
 
 
-PERIODIC_RESOURCE(res_obs_SG,
-                  "title=\"Recurso periodico observable\";obs",
+PERIODIC_RESOURCE(res_mediciones_SG,
+                  "title=\"Reporte de mediciones\";obs",
                   res_get_handler,
                   NULL,
                   NULL,
@@ -71,7 +71,7 @@ res_get_handler(void *request, void *response, uint8_t *buffer, uint16_t preferr
    */
 
   REST.set_header_content_type(response, REST.type.TEXT_PLAIN);
-  REST.set_header_max_age(response, res_obs_SG.periodic->period / CLOCK_SECOND);
+  REST.set_header_max_age(response, res_mediciones_SG.periodic->period / CLOCK_SECOND);
   REST.set_response_payload(response, buffer, snprintf((char *)buffer, preferred_size, "VRMS: %d [mV]\nIRMS: %d [mA]\nP: %d [mW]\nQ: %d [mVAR]\nS: %d [mVA]\nFP (%): %d\n",(int)(datos.Vrms*1000),(int)(datos.Irms*1000),(int)(datos.p*1000),(int)(datos.q*1000),(int)(datos.s*1000),(int)(datos.fp*100)));
 
   /* The REST.subscription_handler() will be called for observable resources by the REST framework. */
@@ -90,6 +90,6 @@ res_periodic_handler()
   /* Usually a condition is defined under with subscribers are notified, e.g., large enough delta in sensor reading. */
   if(1) {
     /* Notify the registered observers which will trigger the res_get_handler to create the response. */
-    REST.notify_subscribers(&res_obs_SG);
+    REST.notify_subscribers(&res_mediciones_SG);
   }
 }

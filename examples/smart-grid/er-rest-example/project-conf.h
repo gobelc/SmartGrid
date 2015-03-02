@@ -86,8 +86,9 @@
 //#define NETSTACK_CONF_MAC     nullmac_driver
 
 /* Increase rpl-border-router IP-buffer when using more than 64. */
+/*NS: Original en 48; lo cambié para tener más payload en CoAP*/
 #undef REST_MAX_CHUNK_SIZE
-#define REST_MAX_CHUNK_SIZE            48
+#define REST_MAX_CHUNK_SIZE            128
 
 /* Estimate your header size, especially when using Proxy-Uri. */
 /*
