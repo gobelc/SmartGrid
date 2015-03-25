@@ -57,7 +57,6 @@
 /*--------------------------------------------------------------------------------------------------*/
 #define ARCHIVO_PRINCIPAL
 #include "variables_globales.h"
-void    pepito();
 /*--------------------------------------------------------------------------------------------------*/
 
 //---------------Metering--------------------
@@ -76,7 +75,7 @@ void    pepito();
 #define VREF3 3 //Tensión de referencia para sensores de 3V
 #define TAM_VENTANA 250 //Cantidad de muestras tomadas en un muestreo
 #define OVERLAP_VENTANA 50 //Muestras solapadas para cálculo de potencia reactiva
-#define PERIODO_MUESTREO 32 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
+#define PERIODO_MUESTREO 16 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
 #define MILISEG_POR_TICK 0.030518 //Cada tick equivale a 0.030518 msegs
 #define TIEMPO_ENTRE_MEDIDAS 3 //Cada cuanto tiempo se realiza una medición.
 
@@ -553,7 +552,6 @@ PROCESS_THREAD(control_carga, ev, data)
 	   }
 	   else{
 		   leds_off(LEDS_BLUE);
-		   pepito();
 	   }
 	   if ((status_relays & 0xF0) > 0){
 		   leds_on(LEDS_GREEN);
