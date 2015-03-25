@@ -57,7 +57,7 @@
 /*--------------------------------------------------------------------------------------------------*/
 #define ARCHIVO_PRINCIPAL
 #include "variables_globales.h"
-
+void    pepito();
 /*--------------------------------------------------------------------------------------------------*/
 
 //---------------Metering--------------------
@@ -553,6 +553,7 @@ PROCESS_THREAD(control_carga, ev, data)
 	   }
 	   else{
 		   leds_off(LEDS_BLUE);
+		   pepito();
 	   }
 	   if ((status_relays & 0xF0) > 0){
 		   leds_on(LEDS_GREEN);
