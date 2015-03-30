@@ -55,6 +55,8 @@
 
 #undef QUEUEBUF_CONF_NUM
 #define QUEUEBUF_CONF_NUM 4
+
+//#define PROCESS_CONF_NO_PROCESS_NAMES 1 //Esto es para optimizar ROM
 /*----------------------------------------*/
 
 /* Custom channel and PAN ID configuration for your project. */

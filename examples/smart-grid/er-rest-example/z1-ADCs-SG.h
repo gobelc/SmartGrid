@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Swedish Institute of Computer Science.
+ * Copyright (c) 2010, Swedish Institute of Computer Science.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,26 +28,21 @@
  *
  * This file is part of the Contiki operating system.
  *
+ *
+ * -----------------------------------------------------------------
+ *
+ * Author  : Joakim Eriksson
+ * Created : 2010-08-26
+ * Updated : $Date: 2010/08/27 12:58:57 $
+ *           $Revision: 1.2 $
  */
+#ifndef Z1_ADCs_SG_H_
+#define Z1_ADCs_SG_H_
 
-/**
- * \file
- *         Header file for the MSP430-specific rtimer code
- * \author
- *         Adam Dunkels <adam@sics.se>
- */
+#define SENSOR_1 0
+#define SENSOR_2 1
+#define SENSOR_3 2
 
-#ifndef RTIMER_ARCH_H_
-#define RTIMER_ARCH_H_
+extern const struct sensors_sensor sensores;
 
-#include "sys/rtimer.h"
-
-#ifdef RTIMER_CONF_SECOND
-#define RTIMER_ARCH_SECOND RTIMER_CONF_SECOND
-#else
-#define RTIMER_ARCH_SECOND (4096U*8)
-#endif
-
-rtimer_clock_t rtimer_arch_now(void);
-
-#endif /* RTIMER_ARCH_H_ */
+#endif /* Z1_ADCs_SG_H_ */

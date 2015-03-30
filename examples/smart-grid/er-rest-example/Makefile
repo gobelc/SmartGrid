@@ -4,7 +4,7 @@ all: er-example-server er-example-client
 CONTIKI=../../..
 
 # Habilitación de debug para Code Watcher
-CFLAGS += -g
+#CFLAGS += -g
 
 #Habilitacion sqrtf
 TARGET_LIBFILES += -lm
@@ -34,6 +34,9 @@ endif
 
 PROJECTDIRS += $(REST_RESOURCES_DIR)
 PROJECT_SOURCEFILES += $(REST_RESOURCES_FILES)
+
+#NS: Ensayos para linkear nuevos sensores
+CONTIKI_SOURCEFILES += z1-ADCs-SG.c
 
 # linker optimizations
 SMALL=1
