@@ -30,10 +30,9 @@
  */
 
 
-#include "contiki.h"
-
 #include <string.h>
 #include "rest-engine.h"
+#include "er-coap.h"
 
 #include "variables_globales.h";
 
@@ -90,6 +89,7 @@ res_post_put_handler(void *request, void *response, uint8_t *buffer, uint16_t pr
   }
   else{
 	  //Acá podría enviar una señal de que el comando recibido no fué válido
+	  PRINTF("Error - Comando incorrecto");
   }
 
   PRINTF("\n%d\n", comando_relays);

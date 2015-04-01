@@ -150,7 +150,7 @@
 #endif
 
 //Opción para activar interface con el usuario y reporte de medidas por serial
-#define PRINT_STANDARD 1
+#define PRINT_STANDARD 0
 #if (!DEBUG_MUESTRAS && PRINT_STANDARD)
 #include <stdio.h>
 #define PRINT_STD(...) printf(__VA_ARGS__)
@@ -158,8 +158,8 @@
 #define PRINT_STD(...)
 #endif
 
-#define BEBUG_RELAY 0
-#if BEBUG_RELAY
+#define DEBUG_RELAY 0
+#if DEBUG_RELAY
   #include "dev/button-sensor.h"
 #endif
 
@@ -289,7 +289,7 @@ PROCESS_THREAD(comunicacion, ev, data)
 
 	/*Activo los recursos que voy a utilizar*/
 
-#if (!DEBUG_MUESTRAS && !PRINT_STANDARD && !DEBUG)
+#if (!DEBUG_MUESTRAS && !PRINT_STANDARD && !DEBUG && !DEBUG_RELAY)
 	rest_activate_resource(&res_mediciones_SG, "Reportes/Mediciones");
 	rest_activate_resource(&res_comando_SG, "Comandos/Relays");
 #endif
@@ -488,7 +488,7 @@ PROCESS_THREAD(control_carga, ev, data)
    * modificar un poco las funciones usadas.
    */
 
-#if BEBUG_RELAY
+#if DEBUG_RELAY
   SENSORS_ACTIVATE(button_sensor);
 #endif
 
@@ -505,11 +505,12 @@ PROCESS_THREAD(control_carga, ev, data)
 
   while(1) {
 
-#if BEBUG_RELAY
+#if DEBUG_RELAY
 	   PROCESS_WAIT_EVENT_UNTIL((ev==sensors_event) && (data == &button_sensor));
-#endif
+#else
 	   PROCESS_WAIT_UNTIL(ev == PROCESS_EVENT_POLL);
 	   ev = PROCESS_EVENT_NONE;
+#endif
 
 	   /*COMANDO DE RELAY 0*/
 	   if ((comando_relays & 0x0F) > 0){
@@ -545,10 +546,11 @@ PROCESS_THREAD(control_carga, ev, data)
 	   else{
 		   leds_off(LEDS_GREEN);
 	   }
-
+	   printf("\nComando [%d]\n", comando_relays);
+	   printf("\nStatus [%d]\n", status_relays);
 
 /*SOLO PARA DEBUG*/
-#if BEBUG_RELAY
+#if DEBUG_RELAY
 	   comando_relays=~comando_relays;
 	   printf("\nComando [%d]\n", comando_relays);
 #endif

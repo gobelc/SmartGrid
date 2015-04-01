@@ -4,7 +4,7 @@ all: $(CONTIKI_PROJECT)
 CONTIKI=../../..
 
 # Habilitación de debug para Code Watcher
-CFLAGS += -g
+#CFLAGS += -g
 
 UIP_CONF_IPV6=1
 CFLAGS+= -DUIP_CONF_IPV6_RPL
