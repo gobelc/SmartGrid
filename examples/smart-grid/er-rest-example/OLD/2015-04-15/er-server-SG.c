@@ -102,9 +102,9 @@
  * Para estos valores se estimó T_CALC < 0.4 seg. Por tanto se cumplen las condiciones 1) y 2)
  *
  */
-#define SENSOR_VOLTAJE SENSOR_1
-#define SENSOR_CORRIENTE SENSOR_3
-#define SENSOR_VREF SENSOR_2
+#define SENSOR_CORRIENTE_1 SENSOR_1
+#define SENSOR_CORRIENTE_2 SENSOR_2
+#define SENSOR_VOLTAJE SENSOR_3
 #define ADC_VREF 2.5 //Tensión de referencia para sensores (entre AVss y 2.5V de ref interna)
 #define TAM_VENTANA 246 //Cantidad de muestras tomadas en un muestreo
 #define OVERLAP_VENTANA 82 //Muestras solapadas para cálculo de potencia reactiva
@@ -114,10 +114,10 @@
 #define TIEMPO_ENTRE_MEDIDAS_TICKS 64//16 //Cada cuanto tiempo se realiza una adquisición y medición [Ticks] (128=CLOCK_SECOND=1 segundo)
 #define TIEMPO_ENTRE_REPORTES_SEG 4 //Tiempo entre medidas reportadas en segundos
 
-#define ADC_OFFSET_CALIBRACION 0.0//-0.063 //Por experimento vimos que el mote mete un offset (V)
+#define ADC_OFFSET_CALIBRACION -0.063 //Por experimento vimos que el mote mete un offset (V)
 //#define OFFSET_MOTE_3V 0.0215 //Por experimento vimos que el mote mete un offset (V)
 //#define OFFSET_MOTE_5V 0.054 //Por experimento vimos que el mote mete un offset (V)
-#define SIGNAL_VDC 0//(1.44 + ADC_OFFSET_CALIBRACION)//Tensión de continua de referencia que manda la placa de preprocesamiento (Vref = (3/5)*Vref_placa con Vref_placa = 2.4V)
+#define SIGNAL_VDC (1.4 + ADC_OFFSET_CALIBRACION)//Tensión de continua de referencia que manda la placa de preprocesamiento.0.0215
 
 #define P6_DO_RELAY_0 2 //Salida del relay 0 (P6.x)
 #define P6_DO_RELAY_1 4 //Salida del relay 1 (P6.x)
@@ -150,7 +150,7 @@
 #endif
 
 //Opción para activar interface con el usuario y reporte de medidas por serial
-#define PRINT_STANDARD 1
+#define PRINT_STANDARD 0
 #if (!DEBUG_MUESTRAS && PRINT_STANDARD)
 #include <stdio.h>
 #define PRINT_STD(...) printf(__VA_ARGS__)
@@ -178,18 +178,17 @@ AUTOSTART_PROCESSES(&comunicacion, &medicion, &control_carga);
 
 /*---------------------DECLARACIÓN DE VARIABLES----------------------------*/
 
-static float Gain_I=1; //Ganancia V/A Amplificador n°1 corriente
-static float Gain_V=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
+static double Gi1=1; //Ganancia V/A Amplificador n°1 corriente
+static double Gi2=1; //Ganancia V/A Amplificador n°2 corriente
+static double Gv=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
 
-//static int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
+static int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
 
 //Buffers que contienen los valores muestreados
-//static uint16_t buff_C1[TAM_VENTANA];
-//static uint16_t buff_C2[TAM_VENTANA];
+static uint16_t buff_C1[TAM_VENTANA];
+static uint16_t buff_C2[TAM_VENTANA];
 //static uint16_t buff_Corr[TAM_VENTANA];
-static uint16_t buff_C[TAM_VENTANA];
 static uint16_t buff_V[TAM_VENTANA];
-
 #if DEBUG_MUESTRAS
 static uint16_t buff_Time_Stamp[TAM_VENTANA];
 #endif
@@ -233,7 +232,8 @@ static struct etimer t_reportes; //Timer utilizado para contar el tiempo entre m
 	 }
 
 	 //Se realiza la lectura de los diferentes sensores. Esto es, se toman las muestras:
-	 buff_C[muestra] = sensores.value(SENSOR_CORRIENTE);
+	 buff_C1[muestra] = sensores.value(SENSOR_CORRIENTE_1);
+	 buff_C2[muestra] = sensores.value(SENSOR_CORRIENTE_2);
 	 buff_V[muestra] = sensores.value(SENSOR_VOLTAJE);
 
 #if DEBUG_MUESTRAS
@@ -371,16 +371,16 @@ PROCESS_THREAD(medicion, ev, data)
 		static char Aux_Time_hay_Overflow;
 
 		Aux_Time_hay_Overflow = 0; //Inicializo el flag de overflow
-
+#endif
 		PRINT_MUESTRAS("\n\n\n");
 		PRINT_MUESTRAS("Tension [mV]; Corriente [mV]; Time stamp [mS]; Time stamp [Ticks];\n\n");
-#endif
+
 		//Para cada muestra calculo el valor medido por el sensor en VOLTS
 		for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
 
-			V_Samp_Volts = ((buff_V[i]*ADC_VREF)/4095.0)-SIGNAL_VDC;
-			C_Samp_Volts = ((buff_C[i]*ADC_VREF)/4095.0)-SIGNAL_VDC;
-			C_Samp_Defasada_Volts = ((buff_C[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-SIGNAL_VDC;
+			V_Samp_Volts = ((buff_V[i]*ADC_VREF)/4096.0)-SIGNAL_VDC;
+			C_Samp_Volts = ((buff_C1[i]*ADC_VREF)/4096.0)-SIGNAL_VDC;
+			C_Samp_Defasada_Volts = ((buff_C1[i+OVERLAP_VENTANA]*ADC_VREF)/4096.0)-SIGNAL_VDC;
 
 	/*Esta parte solo es necesaria cuando se quieren ver las muestras una a una con time stamp*/
 	#if DEBUG_MUESTRAS
@@ -427,25 +427,22 @@ PROCESS_THREAD(medicion, ev, data)
 
 			PRINTF("Muestreo numero %d realizado en instante t = %u[s] = %lu[Ticks]\n", mediciones, clock_seconds(), clock_time()); //DEBUG
 
-			datos_parcial.Vrms+=(sqrtf(VrmsAux/(TAM_VENTANA-OVERLAP_VENTANA)));
-			datos_parcial.Irms+=(sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA)));
-			datos_parcial.p+=(Paux/(TAM_VENTANA-OVERLAP_VENTANA));
-			datos_parcial.q+=(Qaux/(TAM_VENTANA-OVERLAP_VENTANA));
-			//datos_parcial.s+=(datos.Vrms*datos.Irms);
-			//datos_parcial.fp+=(datos.p/datos.s);
+			datos_parcial.Vrms+=(sqrtf(VrmsAux/(TAM_VENTANA-OVERLAP_VENTANA)))/MEDICIONES_PROM;
+			datos_parcial.Irms+=(sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA)))/MEDICIONES_PROM;
+			datos_parcial.p+=(Paux/(TAM_VENTANA-OVERLAP_VENTANA))/MEDICIONES_PROM;
+			datos_parcial.q+=(Qaux/(TAM_VENTANA-OVERLAP_VENTANA))/MEDICIONES_PROM;
+			//datos_parcial.s+=(datos.Vrms*datos.Irms)/MEDICIONES_PROM;
+			//datos_parcial.fp+=(datos.p/datos.s)/MEDICIONES_PROM;
 			mediciones++;
 		}
 		if (mediciones > MEDICIONES_PROM) {
 
 			/*No paso los datos definitivos hasta terminar con el cálculo de todos lo ciclos a promediar*/
-			/*Hasta acá se trabaja con valores de tensión de la señal medida, sin tomar en cuenta las ganancias reales.
-			 * Por eso aquí se convierte a las dimensiones y escalas correctas.
-			 */
 
-			datos.Vrms=(datos_parcial.Vrms * Gain_V)/MEDICIONES_PROM;
-			datos.Irms=(datos_parcial.Irms * Gain_I)/MEDICIONES_PROM;
-			datos.p=(datos_parcial.p * Gain_V * Gain_I)/MEDICIONES_PROM;
-			datos.q=(datos_parcial.q * Gain_V * Gain_I)/MEDICIONES_PROM;
+			datos.Vrms=datos_parcial.Vrms;
+			datos.Irms=datos_parcial.Irms;
+			datos.p=datos_parcial.p;
+			datos.q=datos_parcial.q;
 			datos.s=datos_parcial.Vrms*datos_parcial.Irms;
 			datos.fp=datos_parcial.p/datos_parcial.s;
 

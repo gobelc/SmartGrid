@@ -55,7 +55,7 @@ sensors_activate(uint8_t type)
   if(pre == 0 && adc_on > 0) {
     P6DIR = 0xff;
     P6OUT = 0x00;
-    P6SEL |= 0x0b; /* bit 3 + 1 + 0 */
+    P6SEL |= 0xa2;//0x62; /* bit 6 + 5 + 1 */ /*OJOOOOOO: Acá va 0x62, pero puse 0xa2 para habilitar el AD7 en vez del AD6 para pruebas*/
 
     /* if nothing was started before, start up the ADC system */
     /* Set up the ADC. */
@@ -132,9 +132,9 @@ configure(int type, int c)
           /* SREF_1 is Vref+ */
 
           /*Input channel + modo de referencia*/
-          ADC12MCTL0 = (INCH_0 + SREF_1); //ADC 0 con referencia entre AVss y VREF interna
-          ADC12MCTL1 = (INCH_1 + SREF_1); //ADC 1 con referencia entre AVss y VREF interna
-          ADC12MCTL2 = (INCH_3 + SREF_1); //ADC 3 con referencia entre AVss y VREF interna
+          ADC12MCTL0 = (INCH_1 + SREF_1); //ADC 1 con referencia entre AVss y VREF interna
+          ADC12MCTL1 = (INCH_5 + SREF_1); //ADC 5 con referencia entre AVss y VREF interna
+          ADC12MCTL2 = (INCH_7 + SREF_1); //ADC 6 con referencia entre AVss y VREF interna //OJOOOO: Cambiar a INCH_6!!!!
 
           sensors_activate(0x0F);
           active = 1;
