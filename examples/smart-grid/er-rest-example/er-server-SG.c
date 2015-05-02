@@ -114,15 +114,42 @@
 #define TIEMPO_ENTRE_MEDIDAS_TICKS 64//16 //Cada cuanto tiempo se realiza una adquisición y medición [Ticks] (128=CLOCK_SECOND=1 segundo)
 #define TIEMPO_ENTRE_REPORTES_SEG 4 //Tiempo entre medidas reportadas en segundos
 
-#define ADC_OFFSET_CALIBRACION 0.0//-0.063 //Por experimento vimos que el mote mete un offset (V)
-//#define OFFSET_MOTE_3V 0.0215 //Por experimento vimos que el mote mete un offset (V)
-//#define OFFSET_MOTE_5V 0.054 //Por experimento vimos que el mote mete un offset (V)
-#define SIGNAL_VDC 0//(1.44 + ADC_OFFSET_CALIBRACION)//Tensión de continua de referencia que manda la placa de preprocesamiento (Vref = (3/5)*Vref_placa con Vref_placa = 2.4V)
-
 #define P6_DO_RELAY_0 2 //Salida del relay 0 (P6.x)
 #define P6_DO_RELAY_1 4 //Salida del relay 1 (P6.x)
 
+#define ADC_OFFSET_CALIBRACION 0.0
 
+//------------------------------------------
+//ºººººººººººººººººººººººººººººººººººººººººº
+//OPCION NODO (EXISTE UNA CALIBRACION PARTICULAR DIFERENTE PARA CADA NODO)
+#define NODO 1 /*Los nodos pueden ser 1, 2, 3, 4 o 5*/
+//ºººººººººººººººººººººººººººººººººººººººººº
+//------------------------------------------
+
+//------------------------------------------
+//OPCION TENSION DE REFERENCIA - FIJO/AUTO
+#define VREF_AUTO 1
+#if (!VREF_AUTO)
+#define VREF_PREDETERMINADO 1.44 //Tensión de continua de referencia que manda la placa de preprocesamiento (Vref = (3/5)*Vref_placa con Vref_placa = 2.4V)
+#if NODO == 1
+#define VREF_PREDETERMINADO 1.452
+#else if NODO ==2
+#define VREF_PREDETERMINADO 1.44
+#endif
+#endif
+//-------------------------------------------
+
+//------------------------------------------
+//GANANCIAS
+#define GANANCIA_V 0
+#define GANANCIA_I 0
+#if NODO == 1
+#define GANANCIA_V 437.055
+#define GANANCIA_I 31.3695
+#else if NODO ==2
+#define GANANCIA_V 437.055
+#define GANANCIA_I 31.3695
+#endif
 //-------------------------------------------
 
 //Opción para debug estándar de Contiki
@@ -139,7 +166,7 @@
 #endif
 
 //Opción para activar reporte de muestras adquiridas
-#define DEBUG_MUESTRAS 0
+#define DEBUG_MUESTRAS 1
 #if DEBUG_MUESTRAS
 #include <stdio.h>
 #define PRINT_MUESTRAS(...) printf(__VA_ARGS__)
@@ -150,7 +177,7 @@
 #endif
 
 //Opción para activar interface con el usuario y reporte de medidas por serial
-#define PRINT_STANDARD 1
+#define PRINT_STANDARD 0
 #if (!DEBUG_MUESTRAS && PRINT_STANDARD)
 #include <stdio.h>
 #define PRINT_STD(...) printf(__VA_ARGS__)
@@ -171,24 +198,23 @@
 extern resource_t res_mediciones_SG;
 extern resource_t res_comando_SG;
 
-PROCESS(comunicacion, "HAN Smart Grid node");
-PROCESS(medicion, "Medicion de consumo");
-PROCESS(control_carga, "Control de Carga");
+PROCESS(comunicacion, "HAN node");
+PROCESS(medicion, "Medicion Consumo");
+PROCESS(control_carga, "Control Carga");
 AUTOSTART_PROCESSES(&comunicacion, &medicion, &control_carga);
 
 /*---------------------DECLARACIÓN DE VARIABLES----------------------------*/
 
-static float Gain_I=1; //Ganancia V/A Amplificador n°1 corriente
-static float Gain_V=1; //Ganancia V/V Voltaje transductor vs Voltaje de Red
-
-//static int flag_corriente; //1 para Corriente 1 ; 0 para Corriente 2.
+static float Gain_I = GANANCIA_I; //Ganancia V/A Amplificador n°1 corriente
+static float Gain_V = GANANCIA_V; //Ganancia V/V Voltaje transductor vs Voltaje de Red
 
 //Buffers que contienen los valores muestreados
-//static uint16_t buff_C1[TAM_VENTANA];
-//static uint16_t buff_C2[TAM_VENTANA];
-//static uint16_t buff_Corr[TAM_VENTANA];
 static uint16_t buff_C[TAM_VENTANA];
 static uint16_t buff_V[TAM_VENTANA];
+
+#if VREF_AUTO
+static uint16_t buff_Vref[TAM_VENTANA];
+#endif
 
 #if DEBUG_MUESTRAS
 static uint16_t buff_Time_Stamp[TAM_VENTANA];
@@ -235,6 +261,9 @@ static struct etimer t_reportes; //Timer utilizado para contar el tiempo entre m
 	 //Se realiza la lectura de los diferentes sensores. Esto es, se toman las muestras:
 	 buff_C[muestra] = sensores.value(SENSOR_CORRIENTE);
 	 buff_V[muestra] = sensores.value(SENSOR_VOLTAJE);
+#if VREF_AUTO
+	 buff_Vref[muestra] = sensores.value(SENSOR_VREF);
+#endif
 
 #if DEBUG_MUESTRAS
 	 buff_Time_Stamp[muestra] = RTIMER_NOW();
@@ -254,7 +283,7 @@ static struct etimer t_reportes; //Timer utilizado para contar el tiempo entre m
  /*-----------------------------------PROCESOS-----------------------------------*/
  /*------------------------------------------------------------------------------*/
 
-//Thred del proceso principal
+//Thread del proceso principal
 PROCESS_THREAD(comunicacion, ev, data)
 {
 
@@ -304,7 +333,7 @@ PROCESS_THREAD(comunicacion, ev, data)
 	PROCESS_END();
 }
 
-//Thred del proceso de medicion
+//Thread del proceso de medicion
 PROCESS_THREAD(medicion, ev, data)
 {
 
@@ -342,7 +371,9 @@ PROCESS_THREAD(medicion, ev, data)
 		/*Mientras se muestrea, el proceso quedará detenido en esta línea. Cuando se tome la última muestra,
 		*la función "muestreo" hará un poll de este proceso y lo destrancará...
 		*/
+		leds_on(LEDS_RED);
 		PROCESS_WAIT_UNTIL(ev == PROCESS_EVENT_POLL);
+		leds_off(LEDS_RED);
 		/*SENSORS_DEACTIVATE(sensores); /*Desactivo sensores. Esta línea quedó comentada porque al desactivar los
 		sensores me desactivaba también los relays.*/
 
@@ -353,17 +384,20 @@ PROCESS_THREAD(medicion, ev, data)
 		static float IrmsAux;
 		static float Paux;
 		static float Qaux;
+		static float Vref;
 
 		//Inicializo variables auxiliares
 		VrmsAux=0;
 		IrmsAux=0;
 		Paux=0;
 		Qaux=0;
+		Vref=0;
 
 		//Variables auxiliares para almacenar muestras en float y pasadas a voltaje.
 		static float V_Samp_Volts; //Muestras de V pasadas a Volts
 		static float C_Samp_Volts; //Muestras de C pasadas a volts
 		static float C_Samp_Defasada_Volts; //Muestras de C desfasada pasadas a Volts
+
 #if DEBUG_MUESTRAS
 		static float Time_Stamp_mS; //Time stamp de cada muestra en usegundos.
 		static int Time_Stamp_mS_Parte_Entera;
@@ -375,16 +409,29 @@ PROCESS_THREAD(medicion, ev, data)
 		PRINT_MUESTRAS("\n\n\n");
 		PRINT_MUESTRAS("Tension [mV]; Corriente [mV]; Time stamp [mS]; Time stamp [Ticks];\n\n");
 #endif
+
+#if VREF_AUTO
+		//Calculo Vref previo a hacer las operaciones
+		for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
+			Vref+=((buff_Vref[i]*ADC_VREF)/4095.0);
+		}
+		Vref = (3*Vref)/(5*(TAM_VENTANA-OVERLAP_VENTANA)); //Además de promediar introdzco la ganacia de 3/5 formada por las R de entrada de los ADC 5V
+		i=0;
+#else
+		Vref = VREF_PREDETERMINADO;
+#endif
+
 		//Para cada muestra calculo el valor medido por el sensor en VOLTS
 		for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
 
-			V_Samp_Volts = ((buff_V[i]*ADC_VREF)/4095.0)-SIGNAL_VDC;
-			C_Samp_Volts = ((buff_C[i]*ADC_VREF)/4095.0)-SIGNAL_VDC;
-			C_Samp_Defasada_Volts = ((buff_C[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-SIGNAL_VDC;
+			V_Samp_Volts = ((buff_V[i]*ADC_VREF)/4095.0)-Vref;
+			C_Samp_Volts = ((buff_C[i]*ADC_VREF)/4095.0)-Vref;
+			C_Samp_Defasada_Volts = ((buff_C[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-Vref;
 
 	/*Esta parte solo es necesaria cuando se quieren ver las muestras una a una con time stamp*/
 	#if DEBUG_MUESTRAS
-			if((buff_Time_Stamp[i] < buff_Time_Stamp[i-1])&&(Aux_Time_hay_Overflow=0)){
+			/*Esto lo saqué porque al final es más útil imprimir el tiempo en ticks*/
+			/*if((buff_Time_Stamp[i] < buff_Time_Stamp[i-1])&&(Aux_Time_hay_Overflow=0)){
 				Aux_Time_hay_Overflow=1;
 			}
 			if(Aux_Time_hay_Overflow){
@@ -398,13 +445,11 @@ PROCESS_THREAD(medicion, ev, data)
 			Time_Stamp_mS_Parte_Entera = floor(Time_Stamp_mS);
 			Time_Stamp_mS_Parte_Decimal = (int)((Time_Stamp_mS-Time_Stamp_mS_Parte_Entera) * 10); //Me quedo con 1 decimales
 
-			PRINT_MUESTRAS("%d; %d; %d.%u; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),Time_Stamp_mS_Parte_Entera,Time_Stamp_mS_Parte_Decimal,buff_Time_Stamp[i]);
+			PRINT_MUESTRAS("%d; %d; %d.%u; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),Time_Stamp_mS_Parte_Entera,Time_Stamp_mS_Parte_Decimal,buff_Time_Stamp[i]);*/
+			//PRINT_MUESTRAS("%d; %d; %d; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),buff_Vref[i],buff_Time_Stamp[i]);
+			PRINT_MUESTRAS("%d; %d; %d; %u;\n",buff_V[i],buff_C[i],buff_Vref[i],buff_Time_Stamp[i]);
 	#endif
 
-			/*IMPORTANTE: Acá falta incluir la elección de sensor de corriente y también falta
-			hacer el cálculo de la corriente a partir del voltaje. Como está hecho hoy, la medición de
-			corriente me da un valor de tensión, pero en ningún lado está la relación tensión-corriente
-			que impone la placa preprocesadora*/
 			VrmsAux += powf(V_Samp_Volts,2);
 			IrmsAux += powf(C_Samp_Volts,2);
 			Paux += V_Samp_Volts*C_Samp_Volts;
@@ -418,8 +463,7 @@ PROCESS_THREAD(medicion, ev, data)
 			datos_parcial.Irms=0;
 			datos_parcial.p=0;
 			datos_parcial.q=0;
-			datos_parcial.s=0;
-			datos_parcial.fp=0;
+			datos_parcial.Vref=0;
 
 			mediciones = 1;
 		}
@@ -431,8 +475,7 @@ PROCESS_THREAD(medicion, ev, data)
 			datos_parcial.Irms+=(sqrtf(IrmsAux/(TAM_VENTANA-OVERLAP_VENTANA)));
 			datos_parcial.p+=(Paux/(TAM_VENTANA-OVERLAP_VENTANA));
 			datos_parcial.q+=(Qaux/(TAM_VENTANA-OVERLAP_VENTANA));
-			//datos_parcial.s+=(datos.Vrms*datos.Irms);
-			//datos_parcial.fp+=(datos.p/datos.s);
+			datos_parcial.Vref+=Vref;
 			mediciones++;
 		}
 		if (mediciones > MEDICIONES_PROM) {
@@ -446,15 +489,14 @@ PROCESS_THREAD(medicion, ev, data)
 			datos.Irms=(datos_parcial.Irms * Gain_I)/MEDICIONES_PROM;
 			datos.p=(datos_parcial.p * Gain_V * Gain_I)/MEDICIONES_PROM;
 			datos.q=(datos_parcial.q * Gain_V * Gain_I)/MEDICIONES_PROM;
-			datos.s=datos_parcial.Vrms*datos_parcial.Irms;
-			datos.fp=datos_parcial.p/datos_parcial.s;
+			datos.Vref=datos_parcial.Vref/MEDICIONES_PROM;
 
 			//Se imprimen todos los valores medidos
 
 			PRINT_STD("<><><><><><><><><><><><><><><><><><><><>\n");
 			PRINT_STD("Medicion de Energia en instante t=%u[s]:\n", clock_seconds());
 			PRINT_STD("----------------------------------------\n");
-			PRINT_STD("VRMS: %d [mV]\nIRMS: %d [mA]\nP: %d [mW]\nQ: %d [mVAR]\nS: %d [mVA]\nFP (%): %d\n",(int)(datos.Vrms*1000),(int)(datos.Irms*1000),(int)(datos.p*1000),(int)(datos.q*1000),(int)(datos.s*1000),(int)(datos.fp*100));
+			PRINT_STD("VRMS: %d [dV]\nIRMS: %d [mA]\nP: %d [dW]\nQ: %d [dVAR]\nRel_Stat: %d\nVref: %d [mV]\n",(int)(datos.Vrms*10),(int)(datos.Irms*1000),(int)(datos.p*10),(int)(datos.q*10),status_relays,(int)(datos.Vref*1000));
 			PRINT_STD("<><><><><><><><><><><><><><><><><><><><>\n");
 
 		}
@@ -486,7 +528,7 @@ PROCESS_THREAD(control_carga, ev, data)
 
   PROCESS_BEGIN();
 
-  /*Selecciono P6.2 y P6.4 como DO de salida. En este caso estoy usando el cuatro, pero poniendo P6.x puedo acceder
+  /*Selecciono P6.2 y P6.4 como DO de salida. En este caso estoy usando el 4, pero poniendo P6.x puedo acceder
    * a cualquier otro pin del puerto P6. Si quisiera usar otro puerto con GPIO para no usar ADCs, tendría que
    * modificar un poco las funciones usadas.
    */

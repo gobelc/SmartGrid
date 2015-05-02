@@ -8,8 +8,7 @@ typedef struct Medida {
 	float Irms;
 	float q;
 	float p;
-	float s;
-	float fp;
+	float Vref;
 } Medida;
 
 /*------------------------------------------------------------*/

@@ -44,7 +44,7 @@
 
 /*NS: Original en 140; lo cambié para tener más payload en CoAP*/
 #undef UIP_CONF_BUFFER_SIZE
-#define UIP_CONF_BUFFER_SIZE    240
+#define UIP_CONF_BUFFER_SIZE    140/*240
 /*----------------------------------------*/
 
 
