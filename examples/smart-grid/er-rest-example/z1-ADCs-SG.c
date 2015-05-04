@@ -59,7 +59,7 @@ sensors_activate(uint8_t type)
 
     /* if nothing was started before, start up the ADC system */
     /* Set up the ADC. */
-    ADC12CTL0 = REF2_5V + SHT0_1 + SHT1_1 + MSC; /* Setup ADC12, ref., sampling time */ /*NS: Originalmente usaba SHT0_6+SHT1_6*/
+    ADC12CTL0 = REF2_5V + SHT0_5 + SHT1_5 + MSC; /* Setup ADC12, ref., sampling time */ /*NS: Originalmente usaba SHT0_6+SHT1_6*/
     ADC12CTL1 = SHP + CONSEQ_3 + CSTARTADD_0;	/* Use sampling timer, repeat-sequenc-of-channels */
     /* convert up to MEM4 */
     ADC12MCTL4 |= EOS;

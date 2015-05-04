@@ -106,8 +106,8 @@
 #define SENSOR_CORRIENTE SENSOR_3
 #define SENSOR_VREF SENSOR_2
 #define ADC_VREF 2.5 //Tensión de referencia para sensores (entre AVss y 2.5V de ref interna)
-#define TAM_VENTANA 246 //Cantidad de muestras tomadas en un muestreo
-#define OVERLAP_VENTANA 82 //Muestras solapadas para cálculo de potencia reactiva
+#define TAM_VENTANA 205 //Cantidad de muestras tomadas en un muestreo
+#define OVERLAP_VENTANA 41 //Muestras solapadas para cálculo de potencia reactiva
 #define PERIODO_MUESTREO 4 //Es el período de muestreo medido en ticks. Cada tick vale 1/32768 [seg] (RTIMER_SECOND=32768 -> 1seg)
 #define MILISEG_POR_TICK 0.030518 //Cada tick equivale a 0.030518 msegs
 #define MEDICIONES_PROM 4 //Cantidad de mediciones a promediar
@@ -117,12 +117,10 @@
 #define P6_DO_RELAY_0 2 //Salida del relay 0 (P6.x)
 #define P6_DO_RELAY_1 4 //Salida del relay 1 (P6.x)
 
-#define ADC_OFFSET_CALIBRACION 0.0
-
 //------------------------------------------
 //ºººººººººººººººººººººººººººººººººººººººººº
 //OPCION NODO (EXISTE UNA CALIBRACION PARTICULAR DIFERENTE PARA CADA NODO)
-#define NODO 1 /*Los nodos pueden ser 1, 2, 3, 4 o 5*/
+#define NODO 2 /*Los nodos pueden ser 1, 2, 3, 4 o 5*/
 //ºººººººººººººººººººººººººººººººººººººººººº
 //------------------------------------------
 
@@ -140,15 +138,30 @@
 //-------------------------------------------
 
 //------------------------------------------
-//GANANCIAS
-#define GANANCIA_V 0
-#define GANANCIA_I 0
+//GANANCIAS Y CALIBRACION
+#define GANANCIA_V 0 //Ganancia empírica de calibración
+#define OFFSET_V 0 //Offset empírico de calibración
+#define GANANCIA_I 0 //Ganancia empírica de calibración
+#define OFFSET_I 0 //Offset empírico de calibración
+#define OFFSET_DESFASAJE 0 //Desfasaje natural del nodo medido en muestras (>0 ----> Corriente adelanta tension)
+#define OFFSET_VREF_V 0 //Si es < 0 significa que la media de las señales es menor al Vref medido.
+#define OFFSET_VREF_I 0 //Si es < 0 significa que la media de las señales es menor al Vref medido.
 #if NODO == 1
-#define GANANCIA_V 437.055
-#define GANANCIA_I 31.3695
+#define GANANCIA_V 437.055 //Ganancia empírica de calibración
+#define OFFSET_V 0 //Offset empírico de calibración
+#define GANANCIA_I 31.3695 //Ganancia empírica de calibración
+#define OFFSET_I 0 //Offset empírico de calibración
+#define OFFSET_DESFASAJE 0 //Desfasaje natural del nodo medido en muestras (>0 ----> Corriente adelanta tension)
+#define OFFSET_VREF_V 0 //Si es < 0 significa que la media de las señales es menor al Vref medido.
+#define OFFSET_VREF_I 0 //Si es < 0 significa que la media de las señales es menor al Vref medido.
 #else if NODO ==2
-#define GANANCIA_V 437.055
-#define GANANCIA_I 31.3695
+#define GANANCIA_V 442.4749 //Ganancia empírica de calibración
+#define OFFSET_V 0 //Offset empírico de calibración
+#define GANANCIA_I 33.3879 //Ganancia empírica de calibración
+#define OFFSET_I -0.0724 //Offset empírico de calibración
+#define OFFSET_DESFASAJE 2 //Desfasaje natural del nodo medido en muestras (>0 ----> Corriente adelanta tension)
+#define OFFSET_VREF_V -0.008 //Si es < 0 significa que la media de las señales es menor al Vref medido.
+#define OFFSET_VREF_I 0 //Si es < 0 significa que la media de las señales es menor al Vref medido.
 #endif
 //-------------------------------------------
 
@@ -166,7 +179,7 @@
 #endif
 
 //Opción para activar reporte de muestras adquiridas
-#define DEBUG_MUESTRAS 1
+#define DEBUG_MUESTRAS 0
 #if DEBUG_MUESTRAS
 #include <stdio.h>
 #define PRINT_MUESTRAS(...) printf(__VA_ARGS__)
@@ -198,9 +211,9 @@
 extern resource_t res_mediciones_SG;
 extern resource_t res_comando_SG;
 
-PROCESS(comunicacion, "HAN node");
-PROCESS(medicion, "Medicion Consumo");
-PROCESS(control_carga, "Control Carga");
+PROCESS(comunicacion, "Nodo");
+PROCESS(medicion, "Medicion");
+PROCESS(control_carga, "Control");
 AUTOSTART_PROCESSES(&comunicacion, &medicion, &control_carga);
 
 /*---------------------DECLARACIÓN DE VARIABLES----------------------------*/
@@ -244,9 +257,9 @@ static struct etimer t_reportes; //Timer utilizado para contar el tiempo entre m
   * principal, y el mismo continúa.
   */
 
- static char muestreo(struct rtimer *rt, void* ptr){
+static char muestreo(struct rtimer *rt, void* ptr){
 
-	 if (muestra < TAM_VENTANA){
+	 if (muestra < TAM_VENTANA-1){
 
 		 uint8_t ret;
 		 ret = rtimer_set(&t_muestreo, RTIMER_NOW()+PERIODO_MUESTREO, 1, (void (*)(struct rtimer *, void *))muestreo, NULL);
@@ -362,7 +375,7 @@ PROCESS_THREAD(medicion, ev, data)
 	while (mediciones <= MEDICIONES_PROM){
 
 		static uint16_t i=0; //Variable auxiliar para for
-		muestra = 1; //Inicializo el número de muestra actual
+		muestra = 0; //Inicializo el número de muestra actual
 
 		SENSORS_ACTIVATE(sensores); //Activo sensores
 
@@ -412,7 +425,7 @@ PROCESS_THREAD(medicion, ev, data)
 
 #if VREF_AUTO
 		//Calculo Vref previo a hacer las operaciones
-		for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
+		for (i=0; i<TAM_VENTANA-OVERLAP_VENTANA; i++){
 			Vref+=((buff_Vref[i]*ADC_VREF)/4095.0);
 		}
 		Vref = (3*Vref)/(5*(TAM_VENTANA-OVERLAP_VENTANA)); //Además de promediar introdzco la ganacia de 3/5 formada por las R de entrada de los ADC 5V
@@ -422,11 +435,21 @@ PROCESS_THREAD(medicion, ev, data)
 #endif
 
 		//Para cada muestra calculo el valor medido por el sensor en VOLTS
-		for (i=1; i<=TAM_VENTANA-OVERLAP_VENTANA; i++){
+		for (i=0; i<TAM_VENTANA-OVERLAP_VENTANA; i++){
 
-			V_Samp_Volts = ((buff_V[i]*ADC_VREF)/4095.0)-Vref;
-			C_Samp_Volts = ((buff_C[i]*ADC_VREF)/4095.0)-Vref;
-			C_Samp_Defasada_Volts = ((buff_C[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-Vref;
+#if OFFSET_DESFASAJE > 0	//Si la corriente adelanta la tensión, lo arreglo adelantando la tensión.
+
+			V_Samp_Volts = ((buff_V[i+OFFSET_DESFASAJE]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_V;
+			C_Samp_Volts = ((buff_C[i]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_I;
+			C_Samp_Defasada_Volts = ((buff_C[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_I;
+
+#else	//Si la corriente atrasa la tensión, lo arreglo adelantando la corriente.
+
+			V_Samp_Volts = ((buff_V[i+OVERLAP_VENTANA]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_V;
+			C_Samp_Volts = ((buff_C[i+OVERLAP_VENTANA+OFFSET_DESFASAJE]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_I;
+			C_Samp_Defasada_Volts = ((buff_C[i+OFFSET_DESFASAJE]*ADC_VREF)/4095.0)-Vref-OFFSET_VREF_I;
+
+#endif
 
 	/*Esta parte solo es necesaria cuando se quieren ver las muestras una a una con time stamp*/
 	#if DEBUG_MUESTRAS
@@ -447,7 +470,10 @@ PROCESS_THREAD(medicion, ev, data)
 
 			PRINT_MUESTRAS("%d; %d; %d.%u; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),Time_Stamp_mS_Parte_Entera,Time_Stamp_mS_Parte_Decimal,buff_Time_Stamp[i]);*/
 			//PRINT_MUESTRAS("%d; %d; %d; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),buff_Vref[i],buff_Time_Stamp[i]);
-			PRINT_MUESTRAS("%d; %d; %d; %u;\n",buff_V[i],buff_C[i],buff_Vref[i],buff_Time_Stamp[i]);
+			//PRINT_MUESTRAS("%d; %d; %d; %u;\n",buff_V[i],buff_C[i],buff_Vref[i],buff_Time_Stamp[i]);
+			PRINT_MUESTRAS("%d; %d; %d; %u;\n",(int)(V_Samp_Volts*1000),(int)(C_Samp_Volts*1000),(int)(C_Samp_Defasada_Volts*1000),buff_Time_Stamp[i]);
+			//PRINT_MUESTRAS("%d; %d; %d; %u;\n",buff_V[i+OVERLAP_VENTANA],buff_C[i+OVERLAP_VENTANA],(i+OVERLAP_VENTANA),buff_Time_Stamp[i+OVERLAP_VENTANA]);
+
 	#endif
 
 			VrmsAux += powf(V_Samp_Volts,2);
@@ -485,10 +511,10 @@ PROCESS_THREAD(medicion, ev, data)
 			 * Por eso aquí se convierte a las dimensiones y escalas correctas.
 			 */
 
-			datos.Vrms=(datos_parcial.Vrms * Gain_V)/MEDICIONES_PROM;
-			datos.Irms=(datos_parcial.Irms * Gain_I)/MEDICIONES_PROM;
-			datos.p=(datos_parcial.p * Gain_V * Gain_I)/MEDICIONES_PROM;
-			datos.q=(datos_parcial.q * Gain_V * Gain_I)/MEDICIONES_PROM;
+			datos.Vrms=((datos_parcial.Vrms/MEDICIONES_PROM)*Gain_V)+OFFSET_V;
+			datos.Irms=((datos_parcial.Irms/MEDICIONES_PROM)*Gain_I)+OFFSET_I;
+			datos.p=(datos_parcial.p/MEDICIONES_PROM)*Gain_V*Gain_I;
+			datos.q=(datos_parcial.q/MEDICIONES_PROM)*Gain_V*Gain_I;
 			datos.Vref=datos_parcial.Vref/MEDICIONES_PROM;
 
 			//Se imprimen todos los valores medidos
